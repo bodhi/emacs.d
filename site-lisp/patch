@@ -1,0 +1,17 @@
+--- igrep.el	2007/11/18 19:11:05	1.1
++++ igrep.el	2007/11/18 19:12:28
+@@ -597,9 +597,10 @@
+ 			    (mapconcat (lambda (file)
+ 					 (let ((dir (file-name-directory file)))
+ 					   (if dir
+-					       (expand-file-name
+-						(file-name-nondirectory file)
+-						(igrep-quote-file-name dir))
++					       (file-relative-name
++                                                (expand-file-name
++                                                 (file-name-nondirectory file)
++                                                 (igrep-quote-file-name dir)))
+ 					     file)))
+ 				       files " "))
+ 			  igrep-null-device)))
+
