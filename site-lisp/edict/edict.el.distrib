@@ -1,0 +1,2058 @@
+;;;
+;;; Copyright (C) 1991, 1992 Per Hammarlund (perham@nada.kth.se)
+;;;
+
+;;;
+;;; Some code that looks for translations of english and japanese using the
+;;; EDICTJ Public Domain japanese/english dictionary.
+;;;
+;;; Written by Per Hammarlund <perham@nada.kth.se>
+;;; Morphology and private dictionary handling/editing by Bob Kerns <rwk@crl.dec.com>
+;;; Helpful remarks from Ken-Ichi Handa <handa@etl.go.jp>.
+;;; The EDICTJ PD dictionary is maintained by Jim Breen <jwb@monu6.cc.monash.edu.au>
+;;;
+
+;;;
+;;;   This program is free software; you can redistribute it and/or modify
+;;;   it under the terms of the GNU General Public License as published by
+;;;   the Free Software Foundation; either version 1, or (at your option)
+;;;   any later version.
+;;; 
+;;;   This program is distributed in the hope that it will be useful,
+;;;   but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;;   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;;   GNU General Public License for more details.
+;;; 
+;;;   You should have received a copy of the GNU General Public License
+;;;   along with this program; if not, write to the Free Software
+;;;   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+;;; 
+
+;;;
+;;; Short getting started guide, this assumes that you have not used
+;;; the install script and that you understand the "technical" words
+;;; used, if you don't, please read the documentation in edict.doc:
+;;;
+;;; 1. Make sure that you have placed edict.el in a directory that is included
+;;;    in the nemacs's search path, look at the variable "load-path" to make sure
+;;;    that the directory is in that list.
+;;;
+;;; 2. Add something like this to your .emacs (or .nemacs) file:
+;;;	(autoload 'edict-search-english "edict" "Search for a translation of an English word")
+;;; 	(global-set-key "\e*" 'edict-search-english)
+;;; 	(autoload 'edict-search-kanji "edict" "Search for a translation of a Kanji sequence")
+;;; 	(global-set-key "\e_" 'edict-search-kanji)
+;;; 	(autoload 'edict-insert "edict" "Insert the last translation")
+;;;     (global-set-key "\e+" 'edict-insert)
+;;; Note that you can change the key binding to whatever you like, these are only "examples".
+;;;
+;;; 3. The variable *edict-files* should be a list of filenames of
+;;;    edict dictionary files that you want edict to load and search
+;;;    in.  The real dictionary EDICTJ should be one of these files,
+;;;    you may also have have some local file(s) there.  Something 
+;;;    like this *may* be appropriate to:
+;;;	(setq *edict-files*  '("edictj"
+;;;                            "~my-friend-the-user/.edict"
+;;;                            "~my-other-friend-the-user/.edict"))
+;;;    By default, it searches the load path (the same directories that are searched
+;;;    when you do m-X load-file<return>edict<return>), for a file named "edictj".
+;;;
+;;; 4. Set the name of your *own* local edictj file.  (Note that this file should
+;;;    not be included in the list above!)  Edict will include the additions that
+;;;    you do in this file.  The variable *edict-private-file* defaults to "~/.edict",
+;;;    if you want something else do a:
+;;;	  (setq *edict-private-file* "~/somewhere/somethingelse/")
+;;; (Don't forget to submit your useful words to Jim Breen once in a
+;;; while! His address is jwb@monu6.cc.monash.edu.au)
+;;;
+;;; You are done.  Report errors and comments to perham@nada.kth.se.
+;;;
+
+;;;cl.el is part of gnuemacs, so it should be no problem to require
+;;;  these Common Lisp extensions.
+(require 'cl)
+
+;;; This should exist, but doesn't.  See edict.install for the
+;;; compiler half of this.  You should be sure to load the same
+;;; hacks into your compiler if you compile this by hand, or you
+;;; won't get it byte compiled.
+
+(defmacro eval-when (when &rest forms)
+  (and (or (member 'eval when)
+	    (member ':execute when))
+       (mapcar (function eval) forms))
+  (and (or (member 'load when)
+	   (member ':load-toplevel when))
+       (cons 'progn forms)))
+
+(defvar *edict-private-file* "~/.edict"
+  "*This is the edict dictionary where the user's entries will be added.")
+
+;;*edict-files* should contain a list of filenames for the files that
+;; should be read up into the *edict* buffer.
+(defvar *edict-files* '("edictj")
+"*This is a list of edict files that are loaded into the *edict* buffer
+and searched. You will probably want at least one of them to be the real
+EDICT file.")
+
+;;The edict buffer where the data base, of sorts, is and the buffer
+;; variable.
+(defvar *edict-buffer-name* "*edict*")
+(defvar *edict-buffer* nil)
+
+;;The edict matches buffer and the name of it
+(defvar *edict-match-buffer-name* "*edict matches*")
+(defvar *edict-match-buffer* nil)
+
+(defvar *edict-version-date* "920423 [平成４年４月２３日(木)]"
+  "The variable *edict-version-date* contains a string with the
+date when this version was released.  In both Swedish and Japanese
+standards")
+
+(defvar *edict-version* "0.9.6"
+ "The variable *edict-version* contains a string that describes
+ what version of the edict software that you are running.")
+
+(defun edict-version ()
+  "The function edict-version simply displays (as a message in the
+mini-buffer) the version of the edict software that you are running
+at the moment.  The same string is also returned from the function."
+   (interactive)
+   (message (concat "Edict version " *edict-version*  " of " *edict-version-date*)))
+
+;;; Marker so we can find the individual files in the buffer.
+(defvar *edict-file-begin-marker* "<<<<<<<<<<<<<<<<")
+(defvar *edict-file-end-marker* ">>>>>>>>>>>>>>>>")
+
+;;; This is the set of characters to be ignored in the middle of kanji
+;;; words being looked up.
+;;; The 〆 below should be ○, but there seems to be an off-by-one error
+;;; in the regexp code.
+
+(defvar *edict-kanji-whitespace* "　-〆―-∇ \n\t>;!:#?,.\"/@─-╂")
+
+;;; This is the set of characters to be ignored in the middle of english
+;;; words being looked up.
+;;; The 〆 below should be ○, but there seems to be an off-by-one error
+;;; in the regexp code.
+
+(defvar *edict-eigo-whitespace* "　-〆―-∇ \n\t>;!:#?,.\"/@─-╂")
+
+(defvar *edict-eigo-characters* "[A-Za-zＡ-Ｚａ-ｚ]"
+  "These are the characters that eigo is made up of.")
+
+(defvar *edict-unreadable-error* "While loading edict files: \"%s\" isn't readable!")
+
+(defvar *edict-non-existent-error* "While loading edict files: \"%s\" doesn't exist!")
+
+
+
+;;;
+;;;Reads the edict files (the ones in the list *edict-files*) into a buffer
+;;; called what the string *edict-buffer-name* is set to.
+;;;
+(defun edict-init ()
+  "Reads the edict file into a buffer called *edict*.
+
+This is done only once and the *edict-buffer* is created.
+Use the function edict-force-init to reread the edict files."
+
+  ;;create a match buffer.
+  (if (not (get-buffer *edict-match-buffer-name*))
+    (setq *edict-match-buffer* (get-buffer-create
+				*edict-match-buffer-name*)))
+
+  ;;Check that we have a list of strings, we will check that they are readable below.
+  (if (not (listp *edict-files*))
+    ;;report an error and fail...
+    (error "The variable *edict-files* should be a list of paths to edict files!")
+    ;;Check for strings if it was a list.
+    (if (notevery 'stringp *edict-files*)
+      (error "Something in the list *edict-files* is not a string (path)!")))
+
+  ;;Create and read the edict files.
+  (if (not (get-buffer *edict-buffer-name*))
+    (progn
+      (save-window-excursion
+	;;First create the buffer and make it the current one
+	(setq *edict-buffer* (get-buffer-create *edict-buffer-name*))
+	(set-buffer *edict-buffer*)
+
+	;;Read in the files from the list.
+	(mapcar (function (lambda (filename)
+			    (catch 'found-file
+			      (dolist (dir load-path)
+				(let ((file (expand-file-name filename dir)))
+				  (if (file-exists-p file)
+				      (if (file-readable-p file)
+					  (throw 'found-file (edict-add-file file))
+					(message (format *edict-unreadable-error* filename)))
+				    (message (format *edict-non-existent-error*
+						     filename))))
+				;; If it's an absolute pathname, no need for a search.
+				(when (or (equal (substring filename 0 1) "/")
+					  (equal (substring filename 0 1) "~"))
+				  (throw 'found-file nil))))))
+		(if *edict-private-file*
+		    (cons *edict-private-file* *edict-files*)
+		  *edict-files*))
+
+	;;If none of the files were readable 
+	(if (= 0 (buffer-size))
+	  (progn
+	    (kill-buffer *edict-buffer*)
+	    (error "No edict files found! Check value of *edict-files*.")))
+	)))
+  t)
+
+;;;
+;;;
+;;;
+(defun edict-force-init ()
+  "This function always rereads the edict files even if there is a edict buffer, named
+by the variable *edict-buffer-name*.
+
+Usefule when you have updated the *edict-files* variable or corrupted the
+edict buffer."
+  (interactive)
+  (kill-buffer *edict-buffer*)
+  (edict-init))
+
+;;;
+;;; Add file filename to the current buffer with the begin end markers around that file...
+;;;
+(defun edict-add-file (filename)
+  "This function adds a file, filename, to the current buffer.  A
+*edict-file-begin-marker* and *edict-file-end-marker* are placed around
+the file contents."
+  (goto-char (point-max))
+  (insert (format "%s %s\n" *edict-file-begin-marker* filename))
+  (let ((pos (point)))
+    (insert-file-contents filename)
+    (goto-char (point-max))
+    (insert (format "%s %s\n" *edict-file-end-marker* filename))
+    (goto-char pos)
+    (when (looking-at "？？？？ /\\([ -.0-\177]+\\)/")
+      (message "Loaded dictionary %s."
+	       (buffer-substring (match-beginning 1) (match-end 1))))
+    (goto-char (point-max))))
+
+;;;
+;;; Remove any leading, trailing, or imbedded whitespace or other noise characters
+;;; (such as the inserted ">" etc. used to denote inserted quotations in mail and
+;;; news)
+;;;
+(defun edict-clean-up-kanji (key)
+  (let ((start 0)
+	(loc 0)
+	(end (length key))
+	(result "")
+	(pattern (concat "[" *edict-kanji-whitespace* "]+")))
+    (while (and (< start end) (setq start (string-match pattern key start)))
+      (setq result (concat result (substring key loc start)))
+      (setq loc (setq start (match-end 0))))
+    (concat result (substring key loc))))
+
+(defvar *edict-romaji-remaps* nil)
+(setq *edict-romaji-remaps* 
+      '(("ａ" . "a") ("ｂ" . "b") ("ｃ" . "c") ("ｄ" . "d") ("ｅ" . "e") ("ｆ" . "f") ("ｇ" . "g")
+	("ｈ" . "h") ("ｉ" . "i") ("ｊ" . "j") ("ｋ" . "k") ("ｌ" . "l") ("ｍ" . "m")
+	("ｎ" . "n") ("ｏ" . "o") ("ｐ" . "p") ("ｑ" . "q") ("ｒ" . "r") ("ｓ" . "s") ("ｔ" . "t")
+	("ｕ" . "u") ("ｖ" . "v") ("ｗ" . "w") ("ｘ" . "x") ("ｙ" . "y") ("ｚ" . "z")
+	("Ａ" . "A") ("Ｂ" . "B") ("Ｃ" . "C") ("Ｄ" . "D") ("Ｅ" . "E") ("Ｆ" . "F") ("Ｇ" . "G")
+	("Ｈ" . "H") ("Ｉ" . "I") ("Ｊ" . "J") ("Ｋ" . "K") ("Ｌ" . "L") ("Ｍ" . "M")
+	("Ｎ" . "N") ("Ｏ" . "O") ("Ｐ" . "P") ("Ｑ" . "Q") ("Ｒ" . "R") ("Ｓ" . "S") ("Ｔ" . "T")
+	("Ｕ" . "U") ("Ｖ" . "V") ("Ｗ" . "W") ("Ｘ" . "X") ("Ｙ" . "Y") ("Ｚ" . "Z")))
+
+;;;
+;;; Lookup a mapping for zenkaku roman characters to ASCII.
+;;;
+(defun edict-in-remap-list (item list)
+  "Look for ITEM in LIST; return first link in LIST whose car is `equal' to ITEM."
+  (let ((ptr list)
+        (done nil)
+        (result '()))
+    (while (not (or done (endp ptr)))
+      (cond ((string= item (car (car ptr)))
+             (setq done t)
+             (setq result ptr)))
+      (setq ptr (cdr ptr)))
+    result))
+
+;;;
+;;; Remap zenkaku roman characters to ASCII.
+;;;
+(defun edict-remap-romaji (eigo-string)
+  (let ((stop (length eigo-string))
+	(current 0)
+	(match nil)
+	(result ""))
+    (while (< current stop)
+      (if (<  (+ 1 current) stop)
+	(setq match (edict-in-remap-list (substring eigo-string current (+ 2 current)) *edict-romaji-remaps*))
+	(setq match nil))
+      (if match
+	(progn
+	  (setq result (concat result (cdr (car match))))
+	  (setq current (+ 2 current)))
+	(progn
+	  (setq result (concat result (substring eigo-string current (1+ current))))
+	  (setq current (1+ current)))))
+    result))
+
+;;;
+;;;  Eliminate extra whitespace, newlines, punctuation, etc. which would
+;;;  interfere with our dictionary lookup.
+;;;
+(defun edict-clean-up-eigo (key)
+  (let ((start 0)
+	(loc 0)
+	(end (length key))
+	(result "")
+	(pattern (concat "[" *edict-eigo-whitespace* "]+")))
+    (while (and (< start end)
+		(setq start (string-match pattern key start)))
+      (setq result (concat result (substring key loc start) " "))
+      (setq loc  (setq start (match-end 0))))
+
+    (setf result (concat result (substring key loc)))
+
+    (edict-remap-romaji result)))
+
+;;;
+;;;  slightly specialized function to be changed when the real backward word things are included.
+;;;
+(defun edict-eigo-one-word (direction)
+  "The function edict-eigo-one-word goes one word forward (direction > 0)
+or backward (direction <= 0).  It assumes that is is looking at a word
+when invoked.  It returns the point either at the beginning of a word or
+at the whitespace after a word."
+  (let ((stop-point (point))
+	(stop nil))
+    (if (> direction 0)
+      ;;forward
+      (progn
+	(while (not stop)
+	  (setq stop-point (point))
+	  (if (< (point) (point-max))
+	    (if (looking-at *edict-eigo-characters*)
+	      (forward-char 1)
+ 	      (setq stop t))
+	    (setq stop t))))
+      ;;backward
+      (progn
+	(while (not stop)
+	  (setq stop-point (point))
+	  (if (> (point) (point-min))
+	    (if (looking-at *edict-eigo-characters*)
+	      (backward-char 1)
+	      (progn
+		(setq stop t)
+		(forward-char 1)
+		(setq stop-point (point))))
+	    (setq stop t )))))
+    stop-point))
+    
+
+;;;
+;;; perham
+;;;
+(defun edict-find-word-at-point ()
+  "Find-word-at-point tries to find an English word close to or behind
+point.
+
+If it does not find any word it reports an error."
+  (let (start end)
+
+    ;; Move backward for word if not already on one.
+    (if (not (looking-at *edict-eigo-characters*))
+      (re-search-backward *edict-eigo-characters* (point-min) 'stay))
+
+    (if (looking-at *edict-eigo-characters*)
+      (progn
+	(setq start (edict-eigo-one-word -1))
+	(setq end   (edict-eigo-one-word 1))
+	
+	(edict-clean-up-eigo (buffer-substring start end)))
+      (error "Can't find English word!")
+      )))
+
+;;;
+;;;
+;;;
+(defun edict-search-english (arg)
+  "Attempts to translate the english word we are looking at. Picks the word 
+in the same way as ispell, ie backs up from whitespace, and then expands.
+
+Result is presented in a window that is not selected. Clear the window by
+using a negative prefix argument.
+
+If given an argument, adds an english word to the private dictionary."
+
+  (interactive "P")
+  (if arg
+    (if (< (prefix-numeric-value arg) 0)
+	(edict-restore-display)
+      (edict-add-english))
+    (let ((word (edict-get-english-word)))
+      ;;Search if there is a word.
+      (when word
+	(edict-search-and-display word 'english)))))
+
+;;; Return the english word, or nil
+(defun edict-get-english-word ()
+  (let (word real-word)
+
+    ;;Find the word
+    (setq word (edict-find-word-at-point))
+
+    ;;ask the user if this is really the word that is interesting.
+    (setq real-word (read-string
+		     (format "Translate word (default \"%s\"): "
+			     word)))
+    (setq real-word (edict-clean-up-eigo real-word))
+    (if (equal real-word "")
+	(if (equal word "")
+	    nil
+	  word)
+      real-word)))
+
+;;;
+;;;
+;;;
+(defun edict-search-kanji (arg min max)
+  "Attempts to translate the Kanji sequence between mark and point.
+
+Result is presented in a window that is not selected. Clear the window
+with for instance C-X 1
+
+Given a numeric argument, this adds the Kanji sequence to the user's
+private dictionary."
+
+  ;;Interactive, with a region as argument
+  (interactive "P
+r")
+
+  ;;make sure that the dictionary is read
+  (edict-init)
+
+  (if arg
+      (if (< (prefix-numeric-value arg) 0)
+	  (edict-restore-display)
+	(edict-add-kanji min max))
+    (let ((word (edict-clean-up-kanji (buffer-substring min max))))
+      (if (equal word "")
+	  (error "No word to search for!")
+	(edict-search-and-display word '日本語))))
+  t)
+
+;;;
+;;;
+;;;
+(defun edict-copy-of-current-line ()
+  "Copy-of-current-line creates and returns a copy of the line
+where point is. It does not affect the buffer it is working on,
+except for moving the point around.
+
+It leaves the point at the end of the line, which is fine for this
+application."
+
+  ;;Find the start and end of the current line
+  (let ((line-start (progn (beginning-of-line) (point)))
+	(line-end   (progn (end-of-line) (point))))
+
+    ;;return a copy of his line, perham, is there something that
+    ;; should be tested here?
+    (buffer-substring line-start line-end)))
+
+
+;;;
+;;;
+;;;
+(defun edict-search (key buffer)
+  "Searches the *edict-buffer* and returns a list of strings that are
+the matches.
+
+If there are no matches this string will be nil."
+
+  ;;perham, should this really go here? Or what should we have? Look
+  ;;at ispell.el...
+  (save-window-excursion
+    (message (format "Searching for word \"%s\"..." key))
+    (let ((match-list nil))
+      ;;select the database and goto to the first char
+      (set-buffer buffer)
+      (goto-char (point-min))
+      ;;Search for lines that match the key and copy the over to the
+      ;; match buffer.
+      (while (edict-search-key key)
+	(setq match-list (edict-union match-list (list (edict-copy-of-current-line)))))
+      match-list)))
+
+(defun edict-search-key (key)
+  (search-forward			;Ken-ichi says that one cannot
+					;use the re-search-forward
+					;function with actually having
+					;some reg exp in the starget string.
+					;(concat "[\[/ 
+					;]" key "[\]/ ]")
+   key nil t))
+
+;;;
+;;;
+;;;
+
+(defvar *edict-previous-configuration* nil)
+
+(defun edict-note-windows ()
+  (or *edict-previous-configuration*
+      (setq *edict-previous-configuration* (current-window-configuration))))
+
+;;; This doesn't work yet; leave it set to 'top!
+(defvar *edict-window-location* 'top
+  "*Location to place edict matches window.  top or bottom.
+Doesn't work yet.")
+
+(defun edict-display (key-list match-list)
+  "Edict-display displayes the strings in a separate window that is
+not selected."
+  (let* ((text-window (get-buffer-window (current-buffer)))
+	 (edict-window (get-buffer-window *edict-match-buffer*))
+	 ;; We have available some of this window's height plus any we've already
+	 ;; already gotten.
+	 (avail-height (+ (window-height text-window)
+			  (if edict-window
+			      (window-height edict-window)
+			    0)))
+	 ;; We limit the height to half of what's available, but no more than we need,
+	 ;; and no less than window-min-height.  We must remember to include 1 line for
+	 ;; the mode-line in our minimum figure.
+	 (height (min (max window-min-height (+ (length match-list) 1))
+		      (/ avail-height 2))))
+    (if (not edict-window)
+	(progn
+	  ;; We don't have a window, so remember our existing configuration,
+	  ;; and either find an acceptable window to split, or use the current
+	  ;; window.
+	  (edict-note-windows)
+	  (let ((use-window (edict-find-acceptable-window text-window)))
+	    (if use-window
+		(setq edict-window use-window
+		      text-window (split-window text-window height))
+	      (setq edict-window text-window))))
+      ;; We have a window already.  Just adjust its size appropriately.
+      (unless (equal height (window-height edict-window))
+	(let ((selected (selected-window)))
+	  (select-window edict-window)
+	  (enlarge-window (- height (window-height edict-window))))))
+    (set-buffer *edict-match-buffer*)
+    (let ((min (point-min)))
+      ;; Replace everything.
+      (erase-buffer)
+      (mapcar (function (lambda (string-item)
+			  (insert string-item)
+			  (newline)))
+	      match-list)
+      (when (eq *edict-window-location* 'bottom)
+	(let ((w text-window)
+	      (setq text-window edict-window
+		    edict-window text-window))))
+      ;; OK, now let's move the exact matches to the top.
+      (goto-char min)
+      ;; Be careful to preserve the order.
+      ;; An exact match is any of "^key ", "[key]", "/key/", or "/to key/".
+      (dolist (key (reverse key-list))
+	(let* ((pattern (concat "^" key " \\|\\[" key "\\]\\|\\/" key
+				"\\/\\|\\/to " key "\\/" ))
+	       (top-lines nil))
+	  ;; First pull them out of the buffer into a list (top-lines).
+	  ;; Then re-insert them at the top.
+	  (while (re-search-forward pattern nil t)
+	    (forward-line 0)
+	    (let ((p (point)))
+	      (forward-line 1)
+	      (push (buffer-substring p (point)) top-lines)
+	      (delete-region p (point))))
+	  (goto-char min)
+	  (mapcar 'insert top-lines)))
+      ;; OK, display it all.
+      (select-window text-window)
+      (set-window-buffer edict-window *edict-match-buffer*)
+      (set-window-start edict-window min)))
+  t)
+
+;;; Find a window which is of acceptable size to split.
+;;; It must be at least twice window-min-height.
+(defun edict-find-acceptable-window (window)
+  (catch 'no-window
+    (let ((new-window window))
+      (while (< (window-height new-window) (* 2 window-min-height))
+	(setq new-window (next-window new-window))
+	(when (eq new-window window)
+	  (throw 'no-window nil)))
+      new-window)))
+
+;;; Try to put the display back the way it was before showing matches.
+(defun edict-restore-display ()
+  "Remove the edict windows."
+  (when *edict-previous-configuration*
+    (set-window-configuration *edict-previous-configuration*))
+  (setq *edict-previous-configuration* nil)
+  t)
+
+;;; Variables to remember the last insertion of a match into our
+;;; buffer, for later replacement.
+
+(defvar edict-last-language nil)
+(defvar edict-insert-last-start)
+(defvar edict-insert-last-end)
+
+;;;
+;;;
+;;;
+(defun edict-search-and-display (key &optional from-language)
+  "Edict-search-and-display searches for matches to the argument key.
+If there are any matches these are displayed in a window that is not
+selected. This window can be removed with C-X 1."
+  (edict-init)
+  ;; Remember the last language looked up, so edict-insert can pick the
+  ;; right one.
+  (setq edict-last-language from-language)
+  (save-excursion
+    (let ((match-list nil)
+	  (one-char-keys nil)
+	  (key-list (edict-expand-string key () () (or from-language '日本語))))
+      ;; Sort them into the order we'd like exact matches to appear.
+      (setq key-list (sort key-list (function (lambda (x y)
+						(let ((lx (length x))
+						      (ly (length y)))
+						  (if (= lx ly)
+						      (string-lessp x y)
+						    (> lx ly)))))))
+      ;; For all the possibilities
+      (dolist (key key-list)
+	;; Search for matches.  We exlude any one-character keys on the theory that they're
+	;; likely to be uninteresting fragments.
+	(if (string-match "^[、-瑤]$" key) ;1 char
+	    (push key one-char-keys)
+	  (setq match-list (edict-union match-list (edict-search key *edict-buffer*)))))
+      ;; If we didn't get anything, we can try including the one-char keys.
+      (or match-list
+	  (dolist (key one-char-keys)
+	    (setq match-list (edict-union match-list (edict-search key *edict-buffer*)))))
+      (if (not match-list)
+	  (edict-delete-matches-window))
+      (edict-display key-list match-list))
+    (message "Found it!")))
+
+(defun edict-insert (arg)
+  "Insert the last value looked up at the current position.  If repeated,
+replace with the next possibility.  If given an argument N, use the
+Nth possibility.  Inserts in the opposite language from what was looked up,
+unless the argument is negative."
+  (interactive "P")
+  ;; If we were given a negative argument, we need to switch languages.
+  (cond ((null arg))
+	((> (prefix-numeric-value arg) 0))
+	(t (case arg
+	     (- (setq arg nil))
+	     (otherwise (setq arg (list (- (prefix-numeric-value arg))))))
+	   (setq edict-last-language
+		 (ecase edict-last-language
+		   (english '日本語)
+		   (日本語 'english)))))
+  (ecase edict-last-language
+    (english (edict-insert-日本語 arg))
+    (日本語 (edict-insert-english arg))))
+
+(defun edict-insert-english (arg)
+  "Insert the last english word looked up at the current position.
+If repeated, replace with the next possibility.  If given an argument N,
+use the Nth possibility."
+  (interactive "P")
+  (or *edict-match-buffer*
+      (error "You must first look up a word."))
+  (let ((value nil))
+    (save-excursion
+      (set-buffer *edict-match-buffer*)
+      ;; If we're going to a specific one, always count from the beginning.
+      (when arg
+	(goto-char (point-min)))
+      ;; If the last command was this, then we're going on to the next possibility.
+      ;; Otherwise, start at the beginning.
+      (case last-command
+	(edict-insert-english)
+	(t (goto-char (point-min))))
+      ;; Seach forward for /<definitition>/  If we don't find one, start over from the
+      ;; beginning.
+      (unless (re-search-forward "/\\([^/\n]+\\)/" (point-max) t (prefix-numeric-value arg))
+	(goto-char (point-min))
+	(unless (or arg
+		    (re-search-forward "/\\([^/\n]+\\)/" (point-max) t))
+	  (error "No match numbered %d found." (prefix-numeric-value arg))))
+      ;; Extract the match.  Leave ourselves just before the final /,
+      ;; so if it starts a new definition, we'll find it.
+      (goto-char (match-end 1))
+      (setq value (buffer-substring (match-beginning 1) (match-end 1))))
+    ;; If we inserted one of our languages, then we should delete the old
+    ;; one first.
+    (case last-command
+      ((edict-insert-english edict-insert-日本語)
+       (delete-region edict-insert-last-start edict-insert-last-end)))
+    ;; Insert, remembering where we did it, so it can be replaced if we
+    ;; repeat the command.
+    (setq edict-insert-last-start (point-marker))
+    (insert value)
+    (setq edict-insert-last-end (point-marker)))
+  ;; Remember this as the last command, not edict-insert.
+  (setq this-command 'edict-insert-english)
+  t)
+
+(defun edict-insert-日本語 (arg)
+  "Insert the last 日本語 word looked up at the current position.
+If repeated, replace with the next possibility.  If given an argument N,
+use the Nth possibility."
+  (interactive "P")
+  (or *edict-match-buffer*
+      (error "You must first look up a word."))
+  (let ((value nil))
+    (save-excursion
+      (set-buffer *edict-match-buffer*)
+      ;; If we're going to a specific one, always count from the beginning.
+      (when arg
+	(goto-char (point-min)))
+      ;; If the last command was this, then we're going on to the next possibility.
+      ;; Otherwise, start at the beginning.
+      (case last-command
+	(edict-insert-日本語)
+	(t (goto-char (point-min))))
+      ;; Seach forward for a word at the start of a line.  If we don't find one,
+      ;; start over from the beginning.
+      (unless (re-search-forward "^\\(\\(\\ch\\|\\ck\\|\\cK\\|\\cc\\|\\cC\\)+\\)[ \t]" 
+				 (point-max) t (prefix-numeric-value arg))
+	(goto-char (point-min))
+	(unless (or arg
+		    (re-search-forward "^\\(\\(\\ch\\|\\ck\\|\\cK\\|\\cc\\|\\cC\\)+\\)[ \t]"
+				       (point-max) t))
+	  (error "No match numbered %d found." (prefix-numeric-value arg))))
+      (goto-char (match-end 1))
+      (setq value (buffer-substring (match-beginning 1) (match-end 1))))
+    ;; If we inserted one of our languages, then we should delete the old
+    ;; one first.
+    (case last-command
+      ((edict-insert-日本語 edict-insert-english)
+       (delete-region edict-insert-last-start edict-insert-last-end)))
+    ;; Insert, remembering where we did it, so it can be replaced if we
+    ;; repeat the command.
+    (setq edict-insert-last-start (point-marker))
+    (insert value)
+    (setq edict-insert-last-end (point-marker)))
+  ;; Remember this as the last command, not edict-insert.
+  (setq this-command 'edict-insert-日本語)
+  t)
+
+;;; Remove the matches window from the screen.
+;;; This is harder than you'd think.
+(defun edict-delete-matches-window ()
+  (interactive)
+  (let ((window (get-buffer-window *edict-match-buffer*)))
+    (when window
+      (let* ((selected (selected-window))
+	     (next (previous-window window))
+	     (height (window-height window))
+	     (nedges (window-edges next))
+	     (tedges (window-edges window)))
+	(delete-window window)
+	;; The following is sheer magic.  Deleting a window is not
+	;; an inverse to splitting a window.  The space is returned
+	;; not to the window below, OR to the window above, but
+	;; rather is divided between them.
+	(when (and (equal (car nedges) (car tedges))
+		   (< (car (cdr nedges)) (car (cdr tedges))))
+	  (select-window next)
+	  (shrink-window (/ (- height 1) 2))
+	  (select-window selected))))
+    (error "No matches for key \"%s\"." key)))
+
+;;; The previous configuration before adding an entry to a private dictionary.
+(defvar edict-previous-window-configuration nil)
+;;; The previously-selected buffer before adding an entry.
+(defvar edict-previous-buffer nil)
+;;; The filename of the file read in to add an entry to.
+(defvar edict-filename nil)
+
+
+;;; Add an entry to a particular file, and update *edict-buffer*.
+;;; Any of kanji/yomi/eigo may be omitted.  The user will be given
+;;; an oportunity to edit and then it will be saved.
+
+(defun edict-add-entry-to-file (filename kanji yomi eigo)
+  (edict-init)
+  (setq filename (expand-file-name filename))
+  (let* ((previous-buffer (current-buffer))
+	 (buffer (find-file-noselect filename))
+	 (window (get-buffer-window buffer)))
+    (set-buffer buffer)
+    ;; If it's a new file, give it a version string to print on loadup.
+    (when (equal (point-min) (point-max))
+      (insert (format "？？？？ /%s's private dictionary/\n"
+		      (user-login-name))))
+    ;;  Unless it's already in edict-edit mode, put it in that mode.
+    ;; This gives us our fancy electric-dictionary editing.
+    (unless (eq major-mode 'edict-edit-mode)
+      (edict-edit-mode))
+    ;; Unless we already have a configuration to go back to, remember
+    ;; this one.
+    (unless edict-previous-window-configuration
+      (setq edict-previous-window-configuration
+	    (current-window-configuration)))
+    (unless edict-previous-buffer
+      (setq edict-previous-buffer previous-buffer))
+    ;; Remember the filename, so we can update it in the *edict* buffer
+    ;; when we finish.
+    (setq edict-filename filename)
+    (if window
+	(select-window window)
+      (split-window nil 4))
+    (goto-char (point-max))
+    (edict-insert-entry kanji yomi eigo)
+    ;; Go into henkan mode if appropriate
+    (switch-to-buffer buffer)
+    (edict-set-henkan (or (null kanji) (null yomi)))))
+
+
+;;; Turn on or off henkan
+(defun edict-set-henkan (henkan-flag)
+  (cond
+    ;;EGG
+    ((fboundp 'egg:mode-line-display)
+     (setq egg:*mode-on* henkan-flag
+	   egg:*input-mode* t)
+     (egg:mode-line-display)
+     )
+    ;;SKK
+    ((fboundp 'skk-version)
+     ;;This is a crude way of doing it, but it should give no secondary effects.
+     (skk-mode (if henkan-flag 1 -1))
+     )
+    ))
+
+;;; Insert a dictionary entry at point.
+(defun edict-insert-entry (kanji yomi eigo)
+  ;; Make sure this is on a line of its own.
+  (let ((p (point)))
+    (beginning-of-line)
+    (unless (equal p (point))
+      (end-of-line)
+      (newline)))
+  ;; Now insert a standard entry.
+  (let ((start (point))
+	(p nil))
+    ;; Insert a new entry, leaving out any items which are nil,
+    ;; and also leaving out the yomi if the entry consists of only kana.
+    ;; "日本語"
+    (if kanji
+	(insert kanji)
+      (setq p (point)))
+    (when yomi
+      (unless (string-match "^\\(\\ch\\|\\cH\\|\\ck\\|\\cK\\)+$" yomi)
+	(error "yomi must be in kana: %s." yomi)))
+    ;; "日本語 [にほんご]"
+    (cond ((and kanji
+		(string-match "^\\(\\ch\\|\\cH\\|\\ck\\|\\cK\\)+$" kanji)))
+	  (t (insert " [")
+	     (if yomi
+		 (insert yomi)
+	       (if (not p)
+		   (setq p (point))))
+	     (insert "]")))
+    ;; "日本語 [にほんご] /Japanese language/"
+    (cond ((null eigo)
+	   (insert " /")
+	   (unless p (setq p (point))))
+	  ((stringp eigo)
+	   (insert " /" eigo))
+	  ((consp eigo)
+	   (insert " ")
+	   (dolist (def eigo)
+	     (insert "/")
+	     (insert def)))
+	  (t (error "not a string or list of strings: %s" eigo)))
+    (insert "/\n")
+    ;; Go to the first un-filled-in field.
+    (goto-char (or p start))))
+
+;;; Inverse of edict-insert-entry.  Parse an entry.
+;;; (multiple-value-bind (kanji yomi english) (edict-parse-entry)
+;;;    (edict-insert-entry kanji yomi english))
+;;; duplicates the current line's entry.
+
+(defun edict-parse-entry ()
+  (let ((kanji nil)
+	(yomi nil)
+	(english nil)
+	(start nil)
+	(p nil)
+	(end nil))
+    (save-excursion
+      (end-of-line)
+      (setq end (point))
+      (beginning-of-line)
+      (setq start (point))
+      (search-forward " " end)
+      (setq p (1- (point)))
+      (when (> p start)
+	(setq kanji (buffer-substring start p)))
+      ;; Pick up the [yomi] if there are any.
+      (when (re-search-forward "\\[\\(\\ch\\|\\cH\\|\\ck\\|\\cK\\)+\\]" end t)
+	(setq yomi (buffer-substring (match-beginning 1) (match-end 1)))
+	(goto-char (match-end 0)))
+      ;; Collect up all the definitions.
+      (while (re-search-forward "/\\([^/\n]+\\)/" end t)
+	(goto-char (match-end 1))
+	(push (buffer-substring (match-beginning 1) (match-end 1)) english)))
+    (values kanji yomi english)))
+
+(defvar edict-edit-mode-map ()
+  "Mode map used by edict-add-english/kanji.")
+
+;;; Initialize our mode map.
+(unless edict-edit-mode-map
+  (setq edict-edit-mode-map (make-keymap))
+  (dotimes (i 128)
+    ;; I don't know how to invoke multi-char commands, so don't hook
+    ;; those.
+    (unless (consp (aref edict-edit-mode-map i))
+      (setf (aref edict-edit-mode-map i) 'edict-standin)))
+  (setf (aref edict-edit-mode-map 3) nil
+	(aref edict-edit-mode-map 24) nil
+	(aref edict-edit-mode-map 27) nil)
+  (define-key edict-edit-mode-map "\C-c\C-c" 'edict-exit)
+  (define-key edict-edit-mode-map "\C-x\C-s" 'edict-exit)
+  (define-key edict-edit-mode-map "\t" 'edict-tab)
+  (define-key edict-edit-mode-map "\r" 'edict-new-entry)
+  (define-key edict-edit-mode-map "\C-A" 'edict-beginning-of-line)
+  (define-key edict-edit-mode-map "\C-E" 'edict-end-of-line)
+  (define-key edict-edit-mode-map "\C-x\C-s" 'edict-exit)
+  (define-key edict-edit-mode-map "\C-x\C-s" 'edict-exit)
+  (define-key edict-edit-mode-map "\C-x\C-s" 'edict-exit)
+  (define-key edict-edit-mode-map "[" 'edict-open-bracket)
+  (define-key edict-edit-mode-map "]" 'edict-close-bracket)
+  (define-key edict-edit-mode-map "/" 'edict-slash))
+
+(defun edict-edit-mode ()
+  "Major mode for editing edict entries.
+TAB      Tab to next field in this entry.
+RETURN   Start a new entry on the next line.
+c-A	 Edit the kanji field, and start entering kanji.
+c-E	 Go to the end, and start editing english.
+C-c C-c	 Install the edited changes & save the file.
+C-x C-s  Install the edited changes & save the file.
+"
+  (interactive)
+  (kill-all-local-variables)
+  ;; Associate these with the buffer.
+  (make-local-variable 'edict-previous-window-configuration)
+  (make-local-variable 'edict-previous-bufffer)
+  (make-local-variable 'edict-filename)
+  (set-syntax-table text-mode-syntax-table)
+  (use-local-map edict-edit-mode-map)
+  (setq local-abbrev-table text-mode-abbrev-table)
+  (setq major-mode 'edict-edit-mode)
+  (setq mode-name "Edict")
+  (setq paragraph-start "^\\|$")
+  (setq paragraph-separate "^\\|$")
+  (run-hooks 'text-mode-hook))
+
+;;; Automagically pick the right mode, based on where we are in the string.
+;;; That's henkan mode when we're in the entry or yomi sections, and english
+;;; in the translation section.
+(defun edict-auto-set-henkan ()
+  (save-excursion
+    (let ((x (point))
+	  (end nil))
+      (end-of-line)
+      (setq end (point))
+      (beginning-of-line)
+      (edict-set-henkan
+       (or (looking-at "$")
+	   (when (re-search-forward "[]/]" end t)
+	     (<= x (match-beginning 0))))))))
+
+(defun edict-standin ()
+  "Invoke the command we would otherwise have invoked, after being sure
+we're in the right mode."
+  (interactive)
+  (setq this-command (aref global-map last-command-char))
+  (edict-execute-dictionary-command (function (lambda ()
+						(command-execute this-command)))))
+
+(defun edict-execute-dictionary-command (function)
+  (edict-auto-set-henkan)
+  (let ((buffer (current-buffer)))
+    ;; Canonicalize the end to end in exactly one slash.
+    (unless (<= (point) (point-min))
+      (save-excursion
+	(backward-char 1)
+	(when (looking-at "//\n")
+	  (forward-char 1)
+	  (delete-char 1))))
+    (funcall function)
+    ;; Canonicalize the end of the line to end in exactly one slash.
+    (save-excursion
+      (end-of-line)
+      (delete-horizontal-space)
+      (unless (<= (point) (point-min))
+	(backward-char 2)
+	(while (looking-at "//")
+	  ;; Two in a row; delete the second.
+	  (forward-char 1)
+	  (delete-char 1)
+	  (backward-char 2))
+	(forward-char 1)
+	(unless (looking-at "\n")
+	  (unless (looking-at "[/\n]")
+	    (end-of-line)
+	    (unless (edict-line-has-english)
+	      (insert " /"))
+	    (insert ?/)))))
+    ;; Then if we are at the end, make it end in two, for the sake of visual feedback.
+    ;; Except if we're on a blank line, don't add anything.
+    (unless (<= (point) (point-min))
+      (unless (save-excursion
+		(end-of-line)
+		(backward-char 1)
+		(looking-at "\n"))
+	(when (looking-at "\n")
+	  (insert "/")
+	  (backward-char 1))
+	(save-excursion
+	  (end-of-line)
+	  ;; Make sure there's a trailing newline.
+	  (when (>= (point) (point-max))
+	    (newline)
+	    (backward-char 1))
+	  (let ((end (point)))
+	    (beginning-of-line)
+	    (when (search-forward "/" end t)
+	      (when (looking-at "\n")
+		(insert "/")))))))
+    ;; Only set the henkan if we're still in the same buffer.
+    (when (eq buffer (current-buffer))
+      (edict-auto-set-henkan))))
+
+(defun edict-line-has-english (&optional complete)
+  (save-excursion
+    (let ((p (point)))
+      (end-of-line)
+      (let ((end (point)))
+	(goto-char p)
+	(beginning-of-line)
+	(if complete
+	    (re-search-forward "/[^/\n]+/" end t)
+	  (re-search-forward "/" end t))))))
+
+(defvar *brackets-allowed-in-english* nil
+  "*Allow brackets in the english section of dictionary entries, if non-null.")
+
+(defun edict-open-bracket ()
+  "Begin editing the yomi section of the entry, at the beginning of the entry.
+Self-inserts if in the english section."
+  (interactive)
+  (edict-execute-dictionary-command (function (lambda ()
+						(edict-char-bracket t)))))
+
+(defun edict-close-bracket ()
+  "Begin editing the yomi section of the entry, at the end of the entry.
+Self-inserts if in the english section.."
+  (interactive)
+  (edict-execute-dictionary-command (function (lambda ()
+						(if (looking-at "\\]")
+						    (edict-tab)
+						  (edict-char-bracket nil))))))
+
+(defun edict-char-bracket (open-p)
+  (let ((p (point)))
+    (end-of-line)
+    (let ((end (point)))
+      (beginning-of-line)
+      (cond ((and *brackets-allowed-in-english*
+		  (save-excursion
+		    (re-search-forward "/[^\n/]*/" end t))
+		  (<= (match-beginning 0) p))
+	     (goto-char p)
+	     (edict-standin))
+	    ((re-search-forward "\\[\\(\\ch\\|\\cH\\|\\ck\\|\\cK\\)*\\]" end t)
+	     (goto-char (or (if open-p
+				(match-beginning 1)
+			      (match-end 1))
+			    ;; Empty
+			    (1+ (match-beginning 0)))))
+	    ((re-search-forward "[ \t]" end t)
+	     (goto-char (match-beginning 0))
+	     (insert " []")
+	     (backward-char 1))
+	    (t (goto-char p)
+	       (edict-standin))))))
+
+(defun edict-slash ()
+  "Begin editing the english section of the entry, at the start of the entry.
+Self-inserts if in the english section."
+  (interactive)
+  (edict-execute-dictionary-command (function edict-slash-internal)))
+
+(defun edict-slash-internal ()
+  (if (looking-at "/\n")
+      (forward-char)
+    (let ((p (point)))
+      (end-of-line)
+      (let ((end (point)))
+	(beginning-of-line)
+	(cond ((and (save-excursion
+		      (re-search-forward "/[^/\n]*/" end t))
+		    (<= (match-beginning 0) p))
+	       (goto-char p)
+	       (edict-standin))
+	      ((search-forward "/" end t))
+	      ;; On an empty line, just insert a definition.
+	      ((looking-at "$")
+	       (insert " //")
+	       (backward-char 1))
+	      ;; Otherwise, this line has no english, go to the end and add one.
+	      (t (end-of-line)
+		 (backward-char 1)
+		 (unless (looking-at " ")
+		   (insert " "))
+		 (insert "//")
+		 (backward-char 1)))))))
+
+(defun edict-tab ()
+  "Tab to the next edict field in this entry.
+At the end, wraps back to the beginning.."
+  (interactive)
+  (edict-execute-dictionary-command (function edict-tab-internal)))
+
+(defun edict-tab-internal ()
+  (let ((p (point))
+	(end nil))
+    (end-of-line)
+    (setq end (point))
+    (goto-char p)
+    (cond ((re-search-forward "[ \t]\\(\\[\\)\\|\\(/\\)" end t)
+	   (let ((f-begin (or (match-beginning 1) (match-beginning 2)))
+		 (f-end (or (match-end 1) (match-end 2))))
+	     (goto-char f-begin)
+	     (edict-set-henkan (looking-at "\\["))
+	     (goto-char f-end)))
+	  (t (beginning-of-line)
+	     (edict-set-henkan t)))))
+
+(defun edict-beginning-of-line ()
+  "Go to the beginning of the edict entry."
+  (interactive)
+  (edict-execute-dictionary-command (function (lambda ()
+						(beginning-of-line)
+						(edict-set-henkan t)))))
+
+(defun edict-end-of-line ()
+  "Go to the beginning of the edict entry."
+  (interactive)
+  (edict-execute-dictionary-command (function (lambda ()
+						(end-of-line)
+						(edict-set-henkan nil)))))
+
+(defun edict-new-entry (arg)
+  "Start a new edict entry on the next line.
+If given an argument, copies the word but not the yomi or english.
+If given an argument > 4 (i.e. c-U c-U), copies the word and definition,
+but not the yomi."
+  (interactive "P")
+  (edict-execute-dictionary-command (function (lambda ()
+						(edict-new-entry-internal arg)))))
+
+(defun edict-new-entry-internal (arg)
+  (end-of-line)
+  ;;clean up in the dictionary to save space.
+  (delete-horizontal-space)
+  ;;first check that the last thing on this line is a '/', otherwise add one.
+  (unless (<= (point) (point-min))
+    (backward-char)
+    (unless (looking-at "/")
+      (end-of-line)
+      (insert "/"))
+    (multiple-value-bind (kanji yomi english)
+	(edict-parse-entry)
+      (end-of-line)
+      (if (>= (point) (point-max))
+	  (newline)
+	(forward-char 1))
+      (cond ((null arg)
+	     (edict-insert-entry nil nil nil))
+	    ((<= (prefix-numeric-value arg) 4)
+	     (edict-insert-entry kanji nil nil))
+	    (t (edict-insert-entry kanji nil english))))))
+
+(defun edict-exit ()
+  "Exit the editing of a private edict file, saving the buffer and updating the
+running copy of the dictionary, and restoring the window configuration."
+  (interactive)
+  (save-buffer)
+  (let* ((buffer (current-buffer))
+	 (edict-private-buffer (find-file-noselect (expand-file-name *edict-private-file*)))
+	 (filename (or edict-filename (buffer-file-name edict-private-buffer)))
+	 (configuration edict-previous-window-configuration)
+	 (previous-buffer edict-previous-buffer))
+    (setq edict-previous-window-configuration nil
+	  edict-previous-buffer nil)
+    (set-buffer *edict-buffer*)
+    (goto-char (point-min))
+    (search-forward (format "%s %s" *edict-file-begin-marker* filename))
+    (forward-line)
+    (let ((loc (point)))
+      (search-forward (format "%s %s" *edict-file-end-marker* filename))
+      (forward-line 0)
+      (delete-region loc (point))
+      (goto-char loc)
+      (insert-buffer buffer)
+      (when configuration
+	(set-window-configuration configuration))
+      (when previous-buffer
+	(switch-to-buffer previous-buffer)))))
+
+(defun edict-add-word ()
+  "Add any word to the private dictionary."
+  (interactive)
+  (edict-add-entry-to-file *edict-private-file* nil nil nil))
+
+(defun edict-add-english ()
+  "Add the english word at point to the dictionary."
+  (interactive)
+  (let ((word (edict-get-english-word)))
+    (when word
+      (edict-add-entry-to-file *edict-private-file* nil nil word))))
+
+(defun edict-add-kanji (min max)
+  "Add the region as a kanji entry in the dictionary."
+  (interactive "r")
+  (edict-add-entry-to-file *edict-private-file*
+			   (edict-clean-up-kanji (buffer-substring min max))
+			   nil nil))
+
+;;; Table of morphological rules.
+(defvar *edict-syntax-types* nil)
+
+;;; defstruct's defsetfs should expand into this; sigh.
+
+(eval-when (eval load compile)
+(defstruct edict-syntax-type
+  name
+  rules)
+)
+
+(defun get-edict-syntax-type (name)
+  (if (symbolp name)
+      (catch 'found-it
+	(dolist (s *edict-syntax-types*)
+	  (when (eq (edict-syntax-type-name s) name)
+	    (throw 'found-it s)))
+	(let ((new (make-edict-syntax-type :name name :rules ())))
+	  (push new *edict-syntax-types*)
+	  new))
+    name))
+
+(eval-when (eval load compile)
+(defstruct edict-rule
+  name
+  pattern				;Pattern which it must match
+  filter				;Syntactic filter on previous form
+  function				;Function to transform the input
+  additional-args			;Arguments to transform function
+  from-syntax-types			;Syntaxes for which this is vali
+  to-syntax-types)			;Syntaxes to consider after this rule.
+)
+
+;;; Delete all occurrances of a rule from the rule base.
+(defun edict-delete-rule (name)
+  (dolist (s *edict-syntax-types*)
+    (let ((old (edict-get-rule-from-syntax-type name s)))
+      (when old
+	(setf (edict-syntax-type-rules s)
+	      (delq old (edict-syntax-type-rules s)))))))
+
+;(defun edict-decircularize-rules ()
+;  (interactive)
+;  (dolist (s *edict-syntax-types*)
+;    (dolist (r (edict-syntax-type-rules s))
+;      (setf (edict-rule-from-syntax-types r)
+;	    (mapcar (function (lambda (type)
+;				(if (symbolp type)
+;				    type
+;				  (edict-syntax-type-name type))))
+;		    (edict-rule-from-syntax-types r)))
+;      (setf (edict-rule-to-syntax-types r)
+;	    (mapcar (function (lambda (type)
+;				(if (symbolp type)
+;				    type
+;				  (edict-syntax-type-name type))))
+;		    (edict-rule-to-syntax-types r))))))
+;
+;(defun edict-circularize-rules ()
+;  (interactive)
+;  (dolist (s *edict-syntax-types*)
+;    (dolist (r (edict-syntax-type-rules s))
+;      (setf (edict-rule-from-syntax-types r)
+;	    (mapcar (function (lambda (type)
+;				(if (symbolp type)
+;				    (get-edict-syntax-type type)
+;				  type)))
+;		    (edict-rule-from-syntax-types r)))
+;      (setf (edict-rule-to-syntax-types r)
+;	    (mapcar (function (lambda (type)
+;				(if (symbolp type)
+;				    (get-edict-syntax-type type)
+;				  type)))
+;		    (edict-rule-to-syntax-types r))))))
+
+(defun edict-add-rule (name rule)
+  (edict-delete-rule name)
+  (dolist (s (edict-rule-from-syntax-types rule))
+    (push rule (edict-syntax-type-rules s))))
+
+(defun edict-get-rule-from-syntax-type (name syntax-type)
+  (catch 'edict-get-rule
+    (dolist (rule (edict-syntax-type-rules syntax-type))
+      (if (eq name (edict-rule-name rule))
+	  (throw 'edict-get-rule rule)))))
+
+(defmacro define-edict-rule (name pattern fromto function &rest additional-args)
+  ;; First, some compatibility stuff.
+  (let ((filter nil)
+	(from nil)
+	(to nil))
+    (when (stringp fromto)
+      (setq filter fromto
+	    fromto nil))
+    (when (null fromto)
+      (setq fromto '(日本語 日本語)))
+    (setq from (first fromto)
+	  to (second fromto))
+    (unless (listp from)
+      (setq from (list from)))
+    (unless (listp to)
+      (setq to (list to)))
+    (unless (string-match "^\\^\\|\\$$" pattern)
+      (error "Rule %s: pattern must start with ^ or end with $: \"%s\""
+	     name pattern))
+    (when filter
+      (unless (stringp filter)
+	(error "Rule %s: filter must be a regexp"
+	       name)))
+    (` (define-edict-rule-internal '(, name) '(, pattern) '(, filter)
+	 '(, from) '(, to)
+	 (function (, function)) (function (, additional-args))))))
+
+(defun define-edict-rule-internal (name pattern filter 
+					from-syntax-types to-syntax-types
+					function additional-args)
+  (unless (string-match "^\\^\\|\\$$" pattern)
+    (error "Rule %s: pattern must start with ^ or end with $: \"%s\""
+	   name pattern))
+  (when filter
+    (unless (stringp filter)
+      (error "Rule %s: filter must be a regexp"
+	     name)))
+  (let ((from-types nil)
+	(to-types nil))
+    (dolist (f from-syntax-types)
+      (push (get-edict-syntax-type f) from-types))
+    (dolist (to to-syntax-types)
+      (push (get-edict-syntax-type to) to-types))
+    (edict-add-rule name 
+		    (make-edict-rule :name name
+				     :pattern pattern
+				     :filter filter
+				     :from-syntax-types from-types
+				     :to-syntax-types to-types
+				     :function function
+				     :additional-args additional-args))
+    name))
+
+(defun edict-subst-affix (string &rest affixes)
+  (let ((x nil)
+	(i 1)
+	(prev -1)
+	(result ""))
+    (dolist (x affixes)
+      (let ((pos (match-beginning i)))
+	(cond ((eq x 'edict-identity))
+	      ((eq x 'edict-ignore)
+	       (setq result (concat result
+				    (substring string
+					       (max prev 0) (match-beginning i)))
+		     prev (match-end i)))
+	      ((and (symbolp x) (fboundp x))
+	       (setq result
+		     (concat result
+			     (substring string (max prev 0) (match-beginning i))
+			     (funcall x (substring string
+						   (match-beginning i)
+						   (match-end i))))))
+	      ((not (stringp x))
+	       (error "%s is not a string or function name in edict-subst-affix"
+		      x))
+	      ((and pos (>= pos prev))
+	       (setq result (concat result
+				    (substring string
+					       (max prev 0)
+					       (match-beginning i))
+				    x))
+	       (setq prev (match-end i))))
+	(incf i)))
+    (concat result (substring string (max prev 0)))))
+
+;;; Takes a series of alternating pairs of substitution functions
+;;; and arguments for those substitution functions.  This can be
+;;; used to algorithmically replace certain parts (typically involving
+;;; changing an い行 to う行 final character.
+
+(defun edict-subst-modified-affix (string &rest affixes)
+  (let ((fun nil)
+	(args nil)
+	(i 1)
+	(prev -1)
+	(result ""))
+    (while affixes
+      (setq fun (car affixes)
+	    args (car (cdr affixes))
+	    affixes (cdr (cdr affixes)))
+      (let ((pos (match-beginning i)))
+	(cond ((eq fun 'edict-identity))
+	      ((eq fun 'edict-ignore)
+	       (setq result (concat result
+				    (substring string
+					       (max prev 0)
+					       (match-beginning i)))
+		     prev (match-end i)))
+	      ((not (or (stringp fun) (and (symbolp fun) (fboundp fun))))
+	       (error "%s is not a string or function name in %s" 
+		      'edict-subst-modified-affix
+		      x))
+	      ((and pos (>= pos prev))
+	       (setq result (concat result
+				    (substring string (max prev 0) pos)
+				    (apply fun (substring string 
+							  (match-beginning i)
+							  (match-end i))
+					   args)))
+	       (setq prev (max prev (match-end i)))))
+	(incf i)))
+    (concat result (substring string (max prev 0)))))
+
+;;; Ignore this piece
+(defun edict-ignore (affix) "")
+
+;;; Keep this piece
+(defun edict-identity (affix) affix)
+
+;;; Substitute for this piece
+(defun edict-subst (affix data)
+  data)
+
+;;; More or less a guon table, for converting doshi suffixes.
+(defvar *edict-doshi-suffix*
+  '(["わ" "い" "う" "え" "お"];; u -> wa; kau->kawanai
+    ["か" "き" "く" "け" "こ"]
+    ["が" "ぎ" "ぐ" "げ" "ご"]
+    ["さ" "し" "す" "せ" "そ"]
+    ["ざ" "じ" "ず" "ぜ" "ぞ"]
+    ["た" "ち" "つ" "て" "と"]
+    ["だ" "ぢ" "づ" "で" "ど"]
+    ["な" "に" "ぬ" "ね" "の"]
+    ["は" "ひ" "ふ" "へ" "ほ"]
+    ["ば" "び" "ぶ" "べ" "ぼ"]
+    ["ぱ" "ぴ" "ぷ" "ぺ" "ぽ"]
+    ["ま" "み" "む" "め" "も"]
+    ["ら" "り" "る" "れ" "ろ"]))
+
+(defun edict-modify-verb (suffix from to)
+  (catch 'exit
+    (dolist (b *edict-doshi-suffix*)
+      (if (equal suffix (aref b from))
+	  (throw 'exit (aref b to))))
+    (throw 'skip-rule nil)))
+
+;;; Set this to true for debugging.
+(defvar *edict-expand-string-trace* nil)  
+
+;;; This returns a list of the results of applying all rules whose
+;;; patterns match, to all levels of recursion.
+(defun edict-expand-string (string &optional others previous syntax)
+  (let* ((result nil)
+	 (syntax (or syntax '日本語))
+	 (stype (get-edict-syntax-type syntax)))
+    (dolist (rule (edict-syntax-type-rules stype))
+      (when (string-match (edict-rule-pattern rule) string)
+	(catch 'skip-rule
+	  (unless (and previous
+		       (edict-rule-filter rule)
+		       (edict-filter-rule rule previous))
+	    (let ((temp (apply (edict-rule-function rule) string
+			       (edict-rule-additional-args rule))))
+	      (unless (or (equal temp string)
+			  (edict-find temp others)
+			  (edict-find temp result))
+		(when *edict-expand-string-trace*
+		  (read-string (format "%s: %s -> %s -:" 
+				       (edict-rule-name rule)
+				       string temp)))
+		(setq result
+		      (edict-union (edict-expand-string-recurse
+				    temp (cons string (append result others))
+				    string rule)
+				   result))))))))
+    (if (edict-find string result)
+	result
+      (cons string result))))
+
+(defun edict-expand-string-recurse (string others previous rule)
+  (edict-expand-string-syntaxes string others previous 
+				(edict-rule-to-syntax-types rule)))
+
+(defun edict-expand-string-syntaxes (string others previous syntaxes)
+  (let ((result nil))
+    (dolist (syntax syntaxes)
+      (setq result
+	    (edict-union (edict-expand-string string
+					      (append result others)
+					      previous
+					      syntax)
+			 result)))
+    result))
+
+
+;;; Returns T if the rule should not be run, because of the past
+;;; history of expansions.  I.e. if something started out with く
+;;; on the end, and we've made it into an adjective, we should disable
+;;; any expansions based on it being a the conjunctive/stem form of a verb.
+;;; This is done purely based on the most immediately preceding expansion,
+;;; because that is what determined the sense of the word.
+
+(defun edict-filter-rule (rule previous)
+  (let ((filter (edict-rule-filter rule)))
+    (cond ((null filter) nil)
+	  ((null previous) nil)
+	  ((stringp filter)
+	   (string-match filter previous))
+	  ((symbolp filter)
+	   (funcall filter frob))
+	  ((consp filter)
+	   (apply (car filter) frob (cdr filter)))
+	  (t (error "Bogus filter in rule %s: %s" (edict-rule-name rule) filter)))))
+
+
+(defun edict-find (elt list)
+  (catch 'edict-find
+    (dolist (test list)
+      (when (equal elt test)
+	(throw 'edict-find test)))))
+
+(defun edict-union (set1 set2)
+  (let ((result set2))
+    (dolist (frob set1)
+      (unless (edict-find frob set2)
+	(setq result (cons frob result))))
+    result))
+
+;;; The syntax of the rules is:
+;;; (define-edict-rule name <pattern> <conversion-function> <conversion-data>).
+;;; 
+;;;  <pattern> is a regular expression, with the parts to be substituted
+;;;  being denoted by \\(<subpattern>\\).
+;;; 
+;;;  <conversion function> is a funtion responsible for determining the replacements.
+;;;  The current choices are edict-subst-modified-affix and edict-subst-affix.
+;;;  These functions are called just after doing match-string, so the regexp variables
+;;;  are set up.  They are applied to the string, and <conversion-data>.  These functions
+;;;  are responsible for determining and performing the substitutions to be made, and
+;;;  returning a list of possiblities.
+;;; 
+;;;  edict-subst-affix is the simpler case.  It takes as conversion data one string
+;;;  for each subpattern in the pattern.  This string will be used in place of the
+;;;  original.
+;;; 
+;;;  edict-subst-modified-affix takes as conversion data, an alternating list of
+;;;  functions and lists of additional arguments for those functions.  Each function
+;;;  is applied to the substring being replaced and its additional arguments.
+;;;  Likely functions to use include edict-modify-verb, edict-ignore, and edict-subst.
+
+;;; Strip "います"
+(define-edict-rule 「います」を削除する
+  "\\(\\cc\\|\\ch\\)\\([いきぎしちにびみり]\\)\\(ま\\(す\\|せん\\)\\)$"
+  "ませる$"
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-modify-verb (1 2)
+  edict-ignore ())
+
+(define-edict-rule 「ます」を削除する
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(ま\\(す\\|せん\\)\\)$"
+  "ませる$"
+  edict-subst-affix edict-identity "る")
+
+(define-edict-rule 「来ます」の特別ルール
+  "\\(来ま\\(す\\|せん\\)\\)$"
+  ()
+  edict-subst-affix "来る")
+
+(define-edict-rule 「きます」の特別ルール
+  "\\(^\\|て\\|んで\\)\\(きま\\(す\\|せん\\)\\)$"
+  "ませる$"
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-subst ("くる"))
+
+(define-edict-rule 「します」の特別ルール
+  "\\(しま\\(す\\|せん\\)\\)$"
+  ()
+  edict-subst-affix "する")
+
+;;; The several cases of て／って.
+;;;  Note either pattern may generate multiple possibilities.
+;;; Also, た.
+(define-edict-rule 「て／た」から「う」まで変換する
+  "\\(っ\\(て\\|た[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "う")
+
+(define-edict-rule 「て／た」から「つ」まで変換する
+  "\\(っ\\(て\\|た[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "つ")
+(define-edict-rule 「て／た」から「る」まで変換する
+  "\\(っ\\(て\\|た[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "る")
+(define-edict-rule 一段の「て／た」から「る」まで変換する
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(\\(て\\|た[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix edict-identity "る")
+(define-edict-rule 「て／た」から「す」まで変換する
+  "\\(し\\(て\\|た[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "す")
+(define-edict-rule 「て／た」から「く」まで変換する
+  "\\(い\\(て\\|た[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "く")
+(define-edict-rule 「て／た」から「ぐ」まで変換する
+  "\\(い[でだ]\\)$" 
+  ()
+  edict-subst-affix "ぐ")
+(define-edict-rule 「て／た」から「ぶ」まで変換する
+  "\\(ん\\(で\\|だ[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "ぶ")
+(define-edict-rule 「て／た」から「む」まで変換する
+  "\\(ん\\(で\\|だ[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "む")
+(define-edict-rule 「て／た」から「ぬ」まで変換する
+  "\\(ん\\(で\\|だ[ら]?\\)\\)$" 
+  ()
+  edict-subst-affix "ぬ")
+
+;;; 行く is an irregular verb.
+(define-edict-rule 行くの特別ルール
+  "行\\(っ\\(て\\|た[ら]?\\)\\)$"
+  ()
+  edict-subst-affix "く")
+
+(define-edict-rule 「来て」の特別ルール
+  "来\\(て\\|た[ら]?\\)$"
+  ()
+  edict-subst-affix "来る")
+
+(define-edict-rule 「きて」の特別ルール
+  "\\(きて\\|きた[ら]?\\)$"
+  ()
+  edict-subst-affix "くる")
+
+(define-edict-rule 「して」の特別ルール
+  "\\(して\\|した[ら]?\\)$"
+  ()
+  edict-subst-affix "する")
+
+;;; Potential form.
+;;; The filters here are due to 「一段の「て／た」から「る」まで変換する」
+
+(define-edict-rule れる  "\\(\\cc\\|\\ch\\)\\(れる\\)$"
+  "れて$"
+  edict-subst-affix edict-identity "る")
+(define-edict-rule ける "\\(\\cc\\|\\ch\\)\\(ける\\)$"
+  "けて$"
+  edict-subst-affix edict-identity "く")
+(define-edict-rule せる "\\(\\cc\\|\\ch\\)\\(せる\\)$"
+  "せて$"
+  edict-subst-affix edict-identity "す")
+(define-edict-rule てる "\\(\\cc\\|\\ch\\)\\(てる\\)$"
+  "\\(て\\|てられる\\)$"
+  edict-subst-affix edict-identity "つ")
+(define-edict-rule ねる "\\(\\cc\\|\\ch\\)\\(ねる\\)$"
+  "ねて"
+  edict-subst-affix edict-identity "ぬ")
+(define-edict-rule める "\\(\\cc\\|\\ch\\)\\(める\\)$"
+  "めて"
+  edict-subst-affix edict-identity "む")
+(define-edict-rule え "\\(\\cc\\|\\ch\\)\\(える\\)$"
+  "えて"
+  edict-subst-affix edict-identity "う")
+(define-edict-rule げる "\\(\\cc\\|\\ch\\)\\(げる\\)$"
+  "けて"
+  edict-subst-affix edict-identity "ぐ")
+(define-edict-rule べる "\\(\\cc\\|\\ch\\)\\(べる\\)$"
+  "べて"
+  edict-subst-affix edict-identity "ぶ")
+
+;;; 一段動詞。 Also serves for the passive.
+(define-edict-rule られる
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(られる\\)$"
+  ()
+  edict-subst-affix edict-identity "る")
+
+;;; Passive
+(define-edict-rule 五段動詞の「あれる」を変換する 
+  "\\([わかがさたなまばら]\\)\\(れる\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-modify-verb (0 2)
+  edict-ignore ())
+
+(define-edict-rule 来られるのルール
+  "来\\(られる\\)$"
+  ()
+  edict-subst-affix "る")
+
+(define-edict-rule されるのルール
+  "\\(される\\)$"
+  ()
+  edict-subst-affix "する")
+
+;;; Causitive
+(define-edict-rule 五段動詞の「あせる」を変換する 
+  "\\([わかがさたなまばら]\\)\\(せる\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-modify-verb (0 2)
+  edict-ignore ())
+
+(define-edict-rule 一段動詞の「あせる」を変換する 
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(させる\\)$"
+  ()
+  edict-subst-affix edict-identity "る")
+
+(define-edict-rule させるのルール
+  "\\(させる\\)$"
+  ()
+  edict-subst-affix "する")
+
+;;; eba conditional form.
+(define-edict-rule 「えば」を変換する "\\([えけげせてねべめれ]\\)\\(ば\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-modify-verb (3 2)
+  edict-ignore ())
+
+;;; tara conditional form is handled as part of the て／た／たら rules.
+
+;;; The informal negative form.
+(define-edict-rule 「ない」を変換する "\\([わかがさたなまばら]\\)\\(ない\\|ず\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-modify-verb (0 2)
+  edict-ignore ())
+
+(define-edict-rule 一段の「ない」を変換する
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(ない\\|ず\\)$"
+  ()
+  edict-subst-affix edict-identity "る")
+
+(define-edict-rule 「しない」の特別ルール
+  "\\(しない\\|せず\\)$"
+  ()
+  edict-subst-affix "する")
+
+(define-edict-rule 「ない」の特別ルール
+  "^\\(ない\\)$"
+  ()
+  edict-subst-affix "ある")
+
+;;; Conjunctive form
+
+(define-edict-rule 一段のconjunctive
+  "\\(\\cc\\|\\ch\\)[いきぎしちにびみりえけげせてねべめれ]\\(\\)$"
+  "く$\\|かった$\\|くる$\\|くれる$\\|ください$\\|あげる$\\|上げる$\\|しまう$\\|くて$\\|くない$\\|ければ$\\|いる$\\|からず$\\|います$\\|ある$\\|みる$\\|下さい$\\|なさい$\\|やる$\\|もらう$"
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-subst ("る"))
+
+(define-edict-rule 五段のconjunctive
+  "\\(\\cc\\|\\ch\\)\\([いきぎしちにびみり]\\)$"
+  "く$\\|かった$\\|くる$\\|くれる$\\|ください$\\|あげる$\\|上げる$\\|しまう$\\|くて$\\|くない$\\|ければ$\\|いる$\\|からず$\\|います$\\|ある$\\|みる$\\|下さい$\\|なさい$\\|やる$\\|もらう$"
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-modify-verb (1 2))
+
+(define-edict-rule 「する」の特別conjunctive
+  "\\(\\cc\\|\\ch\\|\\ck\\|\\cK\\)\\(し\\)$"
+  "す$"
+  edict-subst-affix edict-identity "する")
+
+(define-edict-rule 「じる」の特別conjunctive
+  "\\(\\cc\\|\\ch\\)\\(じ\\)$"
+  ()
+  edict-subst-affix edict-identity "じる")
+
+(define-edict-rule 「ずる」の特別conjunctive
+  "\\(\\cc\\|\\ch\\)\\(じ\\)$"
+  ()
+  edict-subst-affix edict-identity "ずる")
+
+;;; The informal imperative form, 五段動詞
+(define-edict-rule 「れ」の五段動詞を変換する 
+  "\\(\\cc\\|\\ch\\)\\([えけげせてねべめれ]\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-modify-verb (3 2))
+
+;;; The informal imperative form, 一段動詞
+(define-edict-rule 「ろ」の一段動詞を変換する
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(ろ\\)$"
+  ()
+  edict-subst-affix edict-identity "る")
+
+;;; Irregulars
+(define-edict-rule 「来い」の特別ルール
+  "^\\(来い\\)$"
+  ()
+  edict-subst-affix "来る")
+(define-edict-rule 「こい」の特別ルール
+  "^\\(こい\\)$"
+  "く$"
+  edict-subst-affix "くる")
+
+(define-edict-rule 「しろ」の特別ルール
+  "^\\(しろ\\)$"
+  ()
+  edict-subst-affix "する")
+
+;;; The plain desiderative
+(define-edict-rule 「たい」を削除する 
+  "\\(\\cc\\|\\ch\\)\\([いきぎしちにびみり]\\)\\(たい\\|たがる\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-modify-verb (1 2)
+  edict-ignore ())
+
+(define-edict-rule 一段の「たい」を削除する
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(たい\\|たがる\\)$"
+  ()
+  edict-subst-affix edict-identity "る")
+
+(define-edict-rule 「したい」の特別ルール
+  "^\\(したい\\|したがる\\)$"
+  ()
+  edict-subst-affix "する")
+
+(define-edict-rule 「来たい」の特別ルール
+  "^\\(来たい\\|来たがる\\)$"
+  ()
+  edict-subst-affix "来る")
+(define-edict-rule 「きたい」の特別ルール
+  "^\\(きたい\\|きたがる\\)$"
+  ()
+  edict-subst-affix "くる")
+
+;;; Flush auxilliary verbs after te form.
+(define-edict-rule 助動詞ー１
+  "\\(\\cc\\|\\ch\\)\\(く\\|て\\|んで\\)\\(いる\\|おる\\|います\\|ある\\|おく\\|みる\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-identity ()
+  edict-ignore ())
+
+(define-edict-rule 助動詞ー１ａ
+  "\\(\\cc\\|\\ch\\)\\(て\\|んで\\)\\(る\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-identity ()
+  edict-ignore ())
+
+(define-edict-rule 助動詞ー２
+  "\\(\\cc\\|\\ch\\)\\(く\\|て\\|んで\\)\\(下さい\\|ください\\|なさい\\|いく\\|行く\\|くる\\|来る\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-identity ()
+  edict-ignore ())
+
+(define-edict-rule 助動詞ー３
+  "\\(\\cc\\|\\ch\\)\\(く\\|て\\|んで\\)\\(\\([さ差]し\\)?[あ上]げる\\|やる\\|もらう\\|いただく\\|頂く\\|くれる\\|くださる\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-identity ()
+  edict-ignore ())
+
+(define-edict-rule 助動詞ー４
+  "\\(\\cc\\|\\ch\\)\\(く\\|て\\|んで\\)\\(する\\|成る\\|なる\\|しまう\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-identity ()
+  edict-ignore ())
+
+(define-edict-rule modifiers
+  "\\(\\cc\\|\\ch\\)[いたうくぐすつぬぶむる]\\(らしい\\|そう\\|よう\\)$"
+  ()
+  edict-subst-affix edict-identity "")
+
+(define-edict-rule humble
+  "\\(お\\)\\(\\cc\\|\\ch\\)+\\([いきぎしちにびみり]\\)\\(に成る\\|になる\\|する\\|いたす\\|申し上げる\\|もうしあげる\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-ignore ()
+  edict-identity ()
+  edict-modify-verb (1 2)
+  edict-ignore ())
+
+;;; Volitional
+(define-edict-rule 五段の「おう」
+  "\\(\\cc\\|\\ch\\)\\([おこごそとのぼもろ]\\)\\(う\\)$"
+  ()
+  edict-subst-modified-affix
+  edict-identity ()
+  edict-modify-verb (4 2)
+  edict-ignore ())
+
+(define-edict-rule 一段の「よう」
+  "\\(\\cc\\|[いきぎしちにびみりえけげせてねべめれ]\\)\\(よう\\)$"
+  ()
+  edict-subst-affix edict-identity "る")
+
+(define-edict-rule 「来よう」の特別ルール
+  "\\(来よう\\)$"
+  ()
+  edict-subst-affix "来る")
+(define-edict-rule 「こよう」の特別ルール
+  "\\(こよう\\)$"
+  ()
+  edict-subst-affix "くる")
+(define-edict-rule 「しよう」の特別ルール
+  "\\(しよう\\)$"
+  ()
+  edict-subst-affix "する")
+
+(define-edict-rule てしまう
+  "[^ん]\\(ちゃう\\)$"
+  ()
+  edict-subst-affix "てしまう")
+
+(define-edict-rule でしまう
+  "ん\\(ちゃう\\)$"
+  ()
+  edict-subst-affix "でしまう")
+
+;; Honorific prefixes
+(define-edict-rule 敬語の接頭辞
+  "^\\(お\\|御\\|ご\\)"
+  ()
+  edict-subst-affix "")
+
+;; Various forms of adjectives.
+(define-edict-rule 形容詞ーく
+  "\\(\\cc\\|\\ch\\)\\(く\\)$"
+  "\\(か\\(れる\\|せる\\|ない\\|ず\\)\\|き\\(ます\\|ません\\|たい\\|なから\\|つつ\\|やさい\\|にくい\\|そうな\\)\\|け\\(ば\\|\\|る\\)\\|こう\\|い\\(た\\|たら\\|たり\\|たろう\\|て\\|ている\\)\\)$"
+  edict-subst-affix edict-identity "い")
+(define-edict-rule 形容詞ーくて
+  "\\(\\cc\\|\\ch\\)\\(くて\\)$"
+  ()
+  edict-subst-affix edict-identity "い")
+(define-edict-rule 形容詞ーくない
+  "\\(\\cc\\|\\ch\\)\\(くない\\)$"
+  ()
+  edict-subst-affix edict-identity "い")
+(define-edict-rule 形容詞ーからず
+  "\\(\\cc\\|\\ch\\)\\(からず\\)$"
+  ()
+  edict-subst-affix edict-identity "い")
+(define-edict-rule 形容詞ーかった
+  "\\(\\cc\\|\\ch\\)\\(かった\\)$"
+  ()
+  edict-subst-affix edict-identity "い")
+(define-edict-rule 形容詞ーない
+  "\\(\\cc\\|\\ch\\)\\(\\(じゃ\\|では\\)\\(ない\\|ありません\\)\\)$"
+  ()
+  edict-subst-affix edict-identity "")
+(define-edict-rule 形容詞ーければ
+  "\\(\\cc\\|\\ch\\)\\(ければ\\)$"
+  ()
+  edict-subst-affix edict-identity "い")
+
+;;; Other affixes
+
+(define-edict-rule other-suffixes
+  "\\(\\cc\\|\\ch\\)\\(的\\|てき\\|もの\\|物\\|者\\|式\\|中\\|員\\|する\\|さん\\|先生\\|様\\|さま\\|ちゃん\\|君\\|くん\\|屋\\)$"
+  ()
+  edict-subst-affix edict-identity "")
+
+(define-edict-rule other-prefixes
+  "^\\(昨\\|来\\|全\\|半\\|毎\\)\\cc"
+  ()
+  edict-subst-affix "")
+
+;;; Canonicalize number expressions
+(define-edict-rule numbers
+  "^\\([0-9０-９一二三四五六七八九十百千万億]+\\)\\(\\cc\\|\\ch\\)"
+  ()
+  edict-subst-affix "一" edict-identity )
+
+(define-edict-rule 数なし
+  "^\\([0-9０-９一二三四五六七八九十百千万億]+\\)\\(\\cc\\|\\ch\\)"
+  ()
+  edict-subst-affix edict-ignore edict-identity )
+
+(define-edict-rule だ
+  "\\(じゃない\\|ではない\\|だった\\|だろう\\)$"
+  ()
+  edict-subst-affix "だ")
+
+(define-edict-rule です
+  "\\(じゃありません\\|ではありません\\|でしょう\\)$"
+  ()
+  edict-subst-affix "です")
+
+(define-edict-rule です/だ
+  "\\(です\\)$"
+  ()
+  edict-subst-affix "だ")
+
+(define-edict-rule cupola
+  "\\(\\cc\\|\\ch\\)\\(だ\\|です\\)$"
+  ()
+  edict-subst-affix edict-identity edict-ignore)
+
+(define-edict-rule english-plural
+  "\\([^i][^e]\\|i[^e]\\|[^i]e\\)\\(s\\)$"
+  (english english-noun)
+  edict-subst-affix edict-ignore)
+
+(define-edict-rule english-plural-ies
+  "\\(ies\\)$"
+  (english english-noun)
+  edict-subst-affix "y")
+
+(provide 'edict)

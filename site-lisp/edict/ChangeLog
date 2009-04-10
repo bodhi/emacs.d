@@ -1,0 +1,8 @@
+1998-03-13  SL Baur  <steve@altair.xemacs.org>
+
+	* Created an XEmacs package
+
+	* edict.el:
+	* edict-test.el: Minimal patches to bytecompile under XEmacs 21.0.
+	Converted to ISO-2022-JP.
+
