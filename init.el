@@ -601,3 +601,9 @@ attributes are specified then they are only included in the opening tag."
 
 (add-hook 'markdown-mode-hook 'turn-on-iimage-mode)
 
+(server-start)
+
+(autoload 'csharp-mode "csharp-mode.el" "Major mode for editing C# code." t)
+(setq auto-mode-alist
+   (append '(("\\.cs$" . csharp-mode)) auto-mode-alist))
+
