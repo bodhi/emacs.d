@@ -1,5 +1,17 @@
 (prefer-coding-system 'utf-8)
 
+(defun copy-line (&optional arg)
+  "Do a kill-line but copy rather than kill.  This function directly calls
+kill-line, so see documentation of kill-line for how to use it including prefix
+buffer read-only, so I suggest setting kill-read-only-ok to t."
+  (interactive "P")
+  (let ((kill-read-only-ok t)
+	(buffer-read-only t))
+    (kill-line arg)))
+ 
+(global-set-key "\M-k" 'copy-line)
+
+
 ;; append some additional paths to load-path
 (setq load-path 
           (append (cons (expand-file-name "~/.emacs.d/site-lisp/") load-path)))
