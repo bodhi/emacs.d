@@ -13,8 +13,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 
 
 ;; append some additional paths to load-path
-(setq load-path 
-          (append (cons (expand-file-name "~/.emacs.d/site-lisp/") load-path)))
+(add-to-list 'load-path (expand-file-name "~/.emacs.d/site-lisp/"))
 
 (setq imenu-auto-rescan t)       ; ensure function names auto-refresh
 
@@ -108,6 +107,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 
 (require 'ido)
 (ido-mode t)
+(setq ido-enable-flex-matching t)
 
 (require 'ruby-electric)
 (add-hook 'ruby-mode-hook 'ruby-electric-mode)
@@ -185,11 +185,12 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 (global-set-key (kbd "C-<return>") 'reindent-newline-and-indent)
 
 
+(setq indent-tabs-mode nil)
 ;; Set the tab width
-(setq c-default-style "bsd"
-      c-basic-offset 4)
+(setq c-default-style "bsd")
+(setq c-basic-offset 2)
 ;(setq default-tab-width 4)
-;(setq tab-width 4)
+(setq tab-width 2)
 ;(setq c-basic-indent 4)
 ;(setq-default php-indent 4)
 ;(setq c-basic-offset 4)
@@ -354,24 +355,14 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 	   (- selective-display 2)))
      14)))
 
-(defun configure-work () 
-  "configure emacs for at work"
-  (setq default-frame-alist
-	'((width . 160) (height . 50) (left . 160) (top . 160)))
-  ;;  Use ctrl+function keys f10 through f13 as a 'zoom' control.
-  (global-set-key [C-f13] 'zoom-way-out)
-  (global-set-key [C-f12] 'zoom-out)
-  (global-set-key [C-f11] 'zoom-in)
-  (global-set-key [C-f10] 'zoom-way-in))
+(defun maybe-load-file (name) 
+  "load ~/.emacs.d/<filename>.el if it exists"
+  (let ((filename (concat "~./emacs.d/" name ".el")))
+  (if (file-exists-p filename) 
+      (load filename))))
 
-(defun configure-home ()
-  "configure emacs for at home"
-  (setq default-frame-alist
-	'((width . 120) (height . 42) (left . 40) (top . 40))))
-
-(cond ((string= system-name "g5.local" ) (configure-work))
-      ((string= system-name "bodhi.local") (configure-home))
-      ((string= system-name "mini.local") (configure-work)))
+(maybe-load-file system-type)
+(maybe-load-file system-name)
 
 (global-set-key [C-clear] 'calc)
 
@@ -600,10 +591,3 @@ attributes are specified then they are only included in the opening tag."
    (cons '("\\.text" . markdown-mode) auto-mode-alist))
 
 (add-hook 'markdown-mode-hook 'turn-on-iimage-mode)
-
-(server-start)
-
-(autoload 'csharp-mode "csharp-mode.el" "Major mode for editing C# code." t)
-(setq auto-mode-alist
-   (append '(("\\.cs$" . csharp-mode)) auto-mode-alist))
-
