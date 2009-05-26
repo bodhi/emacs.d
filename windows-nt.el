@@ -22,6 +22,9 @@
 (global-set-key [C-f12] 'zoom-way-out)
 (global-set-key [C-f11] 'zoom-out)
 (global-set-key [C-f10] 'zoom-in)
-(global-set-key [C-f9] 'zoom-way-in))
+(global-set-key [C-f9] 'zoom-way-in)
 
 (global-set-key [C-pause] 'calc)
+
+(setq default-frame-alist
+      '((width . 130) (height . 45) (left . 30) (top . 30)))
