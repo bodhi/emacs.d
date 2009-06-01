@@ -359,7 +359,8 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
   "load ~/.emacs.d/<filename>.el if it exists"
   (let* ((name-var (cond ((symbolp name) (symbol-name name))
 			 (t name)))
-	 (filename (concat "~/.emacs.d/" (downcase name-var) ".el")))
+	 (safe-name-var (replace-regexp-in-string "/" "-" name-var))
+	 (filename (concat "~/.emacs.d/" (downcase safe-name-var) ".el")))
     (if (file-exists-p filename)
       (load filename))))
 
