@@ -5,3 +5,6 @@
 (global-set-key [C-f12] 'zoom-out)
 (global-set-key [C-f11] 'zoom-in)
 (global-set-key [C-f10] 'zoom-way-in)
+
+(global-set-key "\C-z" nil)
+(global-set-key "\C-x\C-z" nil)

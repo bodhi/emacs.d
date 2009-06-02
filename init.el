@@ -175,8 +175,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 (global-set-key (kbd "") `delete-char)
 (global-set-key (kbd "\C-g") `goto-line)
 (global-set-key '[C-tab] 'other-window)
-(global-set-key "\C-z" nil)
-(global-set-key "\C-x\C-z" nil)
+
 (setq-default delete-key-deletes-forward t)
 
 (fset 'reindent-newline-and-indent
