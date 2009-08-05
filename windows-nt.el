@@ -8,6 +8,13 @@
 (setq shell-file-name "bash")
 (setq explicit-shell-file-name "bash")
 
+(require 'cygwin-mount)
+(cygwin-mount-activate)
+
+(setenv "PATH" (concat "/cygdrive/c/Program Files/Git/bin" ";" (getenv "PATH")))
+
+
+
 ;; default face
 (set-face-font 'default "-outline-Envy Code R-normal-r-normal-normal-13-97-96-96-c-*-iso8859-1")
 

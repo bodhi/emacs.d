@@ -593,3 +593,14 @@ attributes are specified then they are only included in the opening tag."
    (cons '("\\.text" . markdown-mode) auto-mode-alist))
 
 (add-hook 'markdown-mode-hook 'turn-on-iimage-mode)
+
+;;; Stefan Monnier <foo at acm.org>. It is the opposite of fill-paragraph
+;;; Takes a multi-line paragraph and makes it into a single line of text.
+(defun unfill-paragraph ()
+  (interactive)
+  (let ((fill-column (point-max)))
+  (fill-paragraph nil)))
+
+(require 'egg)
+(define-key egg-hide-show-map [tab] 'egg-section-cmd-toggle-hide-show)
+(define-key egg-hide-show-map [backtab] 'egg-section-cmd-toggle-hide-show-children)
