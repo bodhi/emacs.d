@@ -1,5 +1,9 @@
 (prefer-coding-system 'utf-8)
 
+;; Undo some changes in emacs 23.1
+(setq inhibit-startup-screen t)
+(transient-mark-mode -1) 
+
 (defun copy-line (&optional arg)
   "Do a kill-line but copy rather than kill.  This function directly calls
 kill-line, so see documentation of kill-line for how to use it including prefix
