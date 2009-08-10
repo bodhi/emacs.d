@@ -608,3 +608,5 @@ attributes are specified then they are only included in the opening tag."
 (require 'egg)
 (define-key egg-hide-show-map [tab] 'egg-section-cmd-toggle-hide-show)
 (define-key egg-hide-show-map [backtab] 'egg-section-cmd-toggle-hide-show-children)
+
+(add-hook 'csharp-mode-hook 'c-subword-mode)
