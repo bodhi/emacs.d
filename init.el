@@ -21,8 +21,8 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 
 (setq imenu-auto-rescan t)       ; ensure function names auto-refresh
 
-(add-to-list 'auto-mode-alist '("\\.js\\'" . javascript-mode))
-(autoload 'javascript-mode "javascript" nil t)
+(autoload 'js2-mode "js2-mode" nil t)
+(add-to-list 'auto-mode-alist '("\\.js$" . js2-mode))
 
 ;; processing
 (add-to-list 'auto-mode-alist '("\\.pde\\'" . java-mode))
@@ -145,18 +145,18 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
     :face mmm-declaration-submode-face
     :front "style=\""
     :back "\"")))
-(mmm-add-classes
- '((embedded-javascript
-    :submode javascript-mode ;; javascript-generic-mode
-    :face mmm-declaration-submode-face
-    :front "<script\[^>\]*>"
-    :back "</script>")))
-(mmm-add-classes
- '((embedded-javascript-attribute
-    :submode javascript-mode ;; javascript-generic-mode
-    :face mmm-declaration-submode-face
-    :front "\\bon\\w+=\\s-*\""
-    :back "\"")))
+;; (mmm-add-classes
+;;  '((embedded-javascript
+;;     :submode javascript-mode ;; javascript-generic-mode
+;;     :face mmm-declaration-submode-face
+;;     :front "<script\[^>\]*>"
+;;     :back "</script>")))
+;; (mmm-add-classes
+;;  '((embedded-javascript-attribute
+;;     :submode javascript-mode ;; javascript-generic-mode
+;;     :face mmm-declaration-submode-face
+;;     :front "\\bon\\w+=\\s-*\""
+;;     :back "\"")))
 
 ;; What files to invoke the new html-mode for?
 (add-to-list 'auto-mode-alist '("\\.rhtml$" . html-mode))
@@ -166,10 +166,10 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
          '(html-mode nil embedded-css))
 (add-to-list 'mmm-mode-ext-classes-alist
          '(html-mode nil embedded-ruby))
-(add-to-list 'mmm-mode-ext-classes-alist
-         '(html-mode nil embedded-javascript))
-(add-to-list 'mmm-mode-ext-classes-alist
-         '(html-mode nil embedded-javascript-attribute))
+;; (add-to-list 'mmm-mode-ext-classes-alist
+;;          '(html-mode nil embedded-javascript))
+;; (add-to-list 'mmm-mode-ext-classes-alist
+;;          '(html-mode nil embedded-javascript-attribute))
 ;; (add-to-list 'mmm-mode-ext-classes-alist
 ;;          '(php-mode nil embedded-html))
 
