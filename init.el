@@ -220,13 +220,11 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
   ;; If you edit it by hand, you could mess it up, so be careful.
   ;; Your init file should contain only one such instance.
   ;; If there is more than one, they won't work right.
- '(default ((t (:background "black" :foreground "white" :inverse-video nil :height 120 :family "apple-courier-new"))))
- '(cursor ((t (:background "green"))) t)
+ '(default ((t (:stipple nil :background "black" :foreground "white" :inverse-video nil :box nil :strike-through nil :overline nil :underline nil :slant normal :weight normal :height 120 :width normal :family "Anonymous Pro"))))
+ '(cursor ((t (:background "green"))))
  '(fringe ((((class color) (background dark)) (:background "grey5"))))
  '(mmm-declaration-submode-face ((t (:background "dark slate gray"))))
- '(mmm-default-submode-face ((t (:background "Grey25"))))
- '(mode-line ((((class color) (min-colors 88)) (:background "grey75" :foreground "black"))))
- '(mode-line-inactive ((default (:inherit mode-line)) (((class color) (min-colors 88) (background dark)) (:background "grey20" :weight light)))))
+ '(mmm-default-submode-face ((t (:background "Grey25")))))
 
 ;;(global-set-key (kbd "C-<tab>") 'next-window)
 
@@ -521,9 +519,10 @@ attributes are specified then they are only included in the opening tag."
 
 (setq slime-net-coding-system 'utf-8-unix)
 (setq inferior-lisp-program "/opt/local/bin/sbcl --noinform")
-(add-to-list 'load-path "~/.emacs.d/site-lisp/slime-2.0")
+(add-to-list 'load-path "~/.emacs.d/site-lisp/slime-2009-06-15")
 (require 'slime)
 (add-hook 'lisp-mode-hook (lambda () (slime-mode t)))
+(slime-setup '(slime-repl))
 
 ;; igrep customisations
 (autoload 'igrep "igrep"
@@ -610,3 +609,6 @@ attributes are specified then they are only included in the opening tag."
 (define-key egg-hide-show-map [backtab] 'egg-section-cmd-toggle-hide-show-children)
 
 (add-hook 'csharp-mode-hook 'c-subword-mode)
+
+;; Supercollider mode
+(add-to-list 'load-path (expand-file-name "~/.emacs.d/supercollider/"))
