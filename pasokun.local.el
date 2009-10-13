@@ -11,3 +11,7 @@
 (global-set-key "\M-h" 'ns-do-hide-emacs)
 
 (setq ns-command-modifier 'meta)
+(setq ns-option-modifier nil)
+
+;;(setq ns-antialias-text nil)
+;;(setq ns-use-qd-smoothing nil)
