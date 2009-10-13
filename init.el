@@ -2,7 +2,7 @@
 
 ;; Undo some changes in emacs 23.1
 (setq inhibit-startup-screen t)
-(transient-mark-mode -1) 
+(transient-mark-mode -1)
 
 (defun copy-line (&optional arg)
   "Do a kill-line but copy rather than kill.  This function directly calls
@@ -12,7 +12,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
   (let ((kill-read-only-ok t)
 	(buffer-read-only t))
     (kill-line arg)))
- 
+
 (global-set-key "\M-k" 'copy-line)
 
 
@@ -24,7 +24,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 (add-to-list 'auto-mode-alist '("\\.js\\'" . javascript-mode))
 (autoload 'javascript-mode "javascript" nil t)
 
-;; processing 
+;; processing
 (add-to-list 'auto-mode-alist '("\\.pde\\'" . java-mode))
 
 (require 'markdown-mode)
@@ -49,7 +49,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 (defun ruby-test-file()
   (interactive)
   (let* ((filename (buffer-file-name))
-         (pkg-root 
+         (pkg-root
           (cond
            ((string-match "^\\(.*\\)/app/models/\\(.*\\)\\.rb$" filename)
             (concat (match-string 1 filename) "/test/unit/"))
@@ -74,7 +74,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 
 (require 'compile)
 (require 'inf-ruby)
-(add-to-list 'compilation-error-regexp-alist 
+(add-to-list 'compilation-error-regexp-alist
     '("test[a-zA-Z0-9_]*([A-Z][a-zA-Z0-9_]*) \\[\\(.*\\):\\([0-9]+\\)\\]:"
      1 2))
 (add-to-list 'compilation-error-regexp-alist
@@ -84,12 +84,12 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 (define-key ruby-mode-map (kbd "C-c C-t") 'ruby-test-function)
 (define-key ruby-mode-map (kbd "C-c C-f") 'ruby-test-file)
 
-(defun compilation-mode-switch-to-inferior-ruby () 
+(defun compilation-mode-switch-to-inferior-ruby ()
   "switch buffer to inferior-ruby-mode and make the buffer writeable"
   (interactive)
   (toggle-read-only -1)
    (inferior-ruby-mode))
-(defun compilation-mode-switch-from-inferior-ruby () 
+(defun compilation-mode-switch-from-inferior-ruby ()
   "switch buffer to compilation-mode"
   (interactive)
   (toggle-read-only 1)
@@ -100,7 +100,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 (setq mac-allow-anti-aliasing nil)
 
 (require 'css-mode "css-mode")
-(setq auto-mode-alist       
+(setq auto-mode-alist
      (cons '("\\.css\\'" . css-mode) auto-mode-alist))
 
 ;;(require 'yaml-mode)
@@ -220,11 +220,13 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
   ;; If you edit it by hand, you could mess it up, so be careful.
   ;; Your init file should contain only one such instance.
   ;; If there is more than one, they won't work right.
- '(default ((t (:stipple nil :background "black" :foreground "white" :inverse-video nil :box nil :strike-through nil :overline nil :underline nil :slant normal :weight normal :height 120 :width normal :family "Anonymous Pro"))))
+ '(default ((t (:stipple nil :background "grey5" :foreground "grey80" :inverse-video nil :box nil :strike-through nil :overline nil :underline nil :slant normal :weight normal :height 120 :width normal :foundry "apple" :family "Anonymous_Pro"))))
  '(cursor ((t (:background "green"))))
+ '(font-lock-comment-face ((((class color) (min-colors 88) (background dark)) (:foreground "chocolate4"))))
  '(fringe ((((class color) (background dark)) (:background "grey5"))))
  '(mmm-declaration-submode-face ((t (:background "dark slate gray"))))
- '(mmm-default-submode-face ((t (:background "Grey25")))))
+ '(mmm-default-submode-face ((t (:background "Grey25"))))
+ '(mode-line ((((class color) (min-colors 88)) (:background "grey50" :foreground "black" :box (:line-width -1 :style released-button))))))
 
 ;;(global-set-key (kbd "C-<tab>") 'next-window)
 
@@ -356,7 +358,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 	   (- selective-display 2)))
      14)))
 
-(defun maybe-load-file (name) 
+(defun maybe-load-file (name)
   "load ~/.emacs.d/<filename>.el if it exists"
   (let* ((name-var (cond ((symbolp name) (symbol-name name))
 			 (t name)))
@@ -466,7 +468,7 @@ attributes are specified then they are only included in the opening tag."
       (cons '("\\.m$" . objc-mode) auto-mode-alist))
 (setq auto-mode-alist
       (cons '("\\.mm$" . objc-mode) auto-mode-alist))
-  
+
 (defun bh-compile ()
   (interactive)
   (let ((df (directory-files "."))
@@ -494,7 +496,7 @@ attributes are specified then they are only included in the opening tag."
               (progn (objc-mode))
             (if (file-exists-p dot-cpp-file)
                 (c++-mode)))))))
- 
+
 (add-hook 'find-file-hook 'bh-choose-header-mode)
 
 (define-key objc-mode-map [f5] 'bh-compile)
@@ -510,7 +512,7 @@ attributes are specified then they are only included in the opening tag."
     ;; and delete the *compilation* window
     (delete-window (get-buffer-window (get-buffer "*compilation*")))
     (message "Compilation Finished"))
-  
+
   ;; Always return the anticipated result of compilation-exit-message-function
   (cons msg code))
 ;; Specify my function (maybe I should have done a lambda function)
