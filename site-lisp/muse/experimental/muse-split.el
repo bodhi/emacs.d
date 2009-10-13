@@ -8,7 +8,7 @@
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -105,7 +105,7 @@ the file is published no matter what."
         (muse-publish-presplit-publish file)
         ;; start a temp buffer for main data
         (muse-with-temp-buffer
-          (insert-file-contents file)
+          (muse-insert-file-contents file)
           (let ((mainbuffer (current-buffer))
                 (subcontents))
             (mapc
@@ -130,7 +130,7 @@ the file is published no matter what."
 
 (defun muse-publish-presplit-publish(file)
   (muse-with-temp-buffer
-    (insert-file-contents file)
+    (muse-insert-file-contents file)
     (let ((muse-publish-markup-regexps muse-publish-presplit-markup-regexps)
           (muse-publish-markup-functions muse-publish-presplit-functions)
           (muse-publishing-styles)
@@ -203,7 +203,7 @@ Changing this will cause bad things to happen. ")
 
 (defun muse-publish-no-split-function (file)
   (muse-with-temp-buffer
-    (insert-file-contents file)
+    (muse-insert-file-contents file)
     (list `(,(file-name-sans-extension file) . (1 ,(point-max))))))
 
 (defun muse-publish-split-file (file)
@@ -342,7 +342,7 @@ the anchor will be output"
 (defun muse-journal-split-by-entry (file)
   "Split a muse journal file into days"
   (muse-with-temp-buffer
-    (insert-file-contents file)
+    (muse-insert-file-contents file)
     (let* ((split-alist)
            (root-name (file-name-sans-extension file))
            (split-regexp "^\\* \\([0-9]\\{8\\}\\)")
@@ -383,7 +383,7 @@ the anchor will be output"
 This function makes the assumption that the entries are sorted. If
 it isn't then it some of the entries will appear not to be published."
   (muse-with-temp-buffer
-    (insert-file-contents file)
+    (muse-insert-file-contents file)
     (let* ((split-alist)
            (root-name (file-name-sans-extension file))
            (split-regexp (concat "^\\* \\([0-9]\\{4\\}\\)\\([0-9]\\{2\\}\\)"

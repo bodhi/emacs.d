@@ -1,15 +1,16 @@
 ;;; muse-xml.el --- publish XML files
 
-;; Copyright (C) 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
-;; Author: Michael Olson (mwolson AT gnu DOT org)
+;; Author: Michael Olson <mwolson@gnu.org>
 ;; Date: Sat 23-Jul-2005
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -81,16 +82,20 @@ This may be text or a filename."
 (defcustom muse-xml-footer "
   <!-- Page published by Emacs Muse ends here -->
 </MUSE>\n"
-  "Footer used for publishing Xml XML files.
+  "Footer used for publishing XML files.
 This may be text or a filename."
   :type 'string
   :group 'muse-xml)
 
 (defcustom muse-xml-markup-regexps
   `(;; Beginning of doc, end of doc, or plain paragraph separator
-    (10000 ,(concat "\\(\\(\n\\([" muse-regexp-blank "]*\n\\)+\\)"
+    (10000 ,(concat "\\(\\(\n\\(?:[" muse-regexp-blank "]*\n\\)*"
+                    "\\([" muse-regexp-blank "]*\n\\)\\)"
                     "\\|\\`\\s-*\\|\\s-*\\'\\)")
-           0 muse-xml-markup-paragraph))
+           ;; this is somewhat repetitive because we only require the
+           ;; line just before the paragraph beginning to be not
+           ;; read-only
+           3 muse-xml-markup-paragraph))
   "List of markup rules for publishing a Muse page to XML.
 For more on the structure of this list, see `muse-publish-markup-regexps'."
   :type '(repeat (choice
@@ -127,6 +132,7 @@ For more on the structure of this list, see
     (rule            . "<hr />")
     (fn-sep          . "<hr />\n")
     (no-break-space  . "&nbsp;")
+    (line-break      . "<br>")
     (enddots         . "....")
     (dots            . "...")
     (section         . "<section level=\"1\"><title>")
@@ -163,6 +169,10 @@ For more on the structure of this list, see
     (end-center      . "\n</format></p>")
     (begin-quote     . "<blockquote>\n")
     (end-quote       . "\n</blockquote>")
+    (begin-cite      . "<cite>")
+    (begin-cite-author . "<cite type=\"author\">")
+    (begin-cite-year . "<cite type=\"year\">")
+    (end-cite        . "</cite>")
     (begin-quote-item . "<p>")
     (end-quote-item  . "</p>")
     (begin-uli       . "<list type=\"unordered\">\n")
@@ -200,7 +210,7 @@ This will be used if no special characters are found."
   :group 'muse-xml)
 
 (defcustom muse-xml-charset-default "utf-8"
-  "The default Xml XML charset to use if no translation is
+  "The default XML charset to use if no translation is
 found in `muse-xml-encoding-map'."
   :type 'string
   :group 'muse-xml)
@@ -217,17 +227,22 @@ found in `muse-xml-encoding-map'."
     (goto-char (match-beginning 0))
     (when (save-excursion
             (save-match-data
-              (and (re-search-backward "<\\(/?\\)p[ >]"
-                                       nil t)
+              (and (not (get-text-property (max (point-min) (1- (point)))
+                                           'muse-no-paragraph))
+                   (re-search-backward "<\\(/?\\)p[ >]" nil t)
                    (not (string-equal (match-string 1) "/")))))
-      (when (get-text-property (1- (point)) 'end-list)
-        (goto-char (previous-single-property-change (1- (point)) 'end-list)))
+      (when (get-text-property (1- (point)) 'muse-end-list)
+        (goto-char (previous-single-property-change (1- (point))
+                                                    'muse-end-list)))
       (muse-insert-markup "</p>"))
     (goto-char end))
   (cond
    ((eobp)
     (unless (bolp)
       (insert "\n")))
+   ((get-text-property (point) 'muse-no-paragraph)
+    (forward-char 1)
+    nil)
    ((eq (char-after) ?\<)
     (when (looking-at (concat "<\\(format\\|code\\|link\\|image"
                               "\\|anchor\\|footnote\\)[ >]"))
@@ -241,19 +256,18 @@ found in `muse-xml-encoding-map'."
       ;; make it agree with the default charset
       (setq buffer-file-coding-system muse-xml-encoding-default))))
 
-;; Register the Muse XML Publisher
+;;; Register the Muse XML Publisher
 
-(unless (assoc "xml" muse-publishing-styles)
-  (muse-define-style "xml"
-                     :suffix     'muse-xml-extension
-                     :regexps    'muse-xml-markup-regexps
-                     :functions  'muse-xml-markup-functions
-                     :strings    'muse-xml-markup-strings
-                     :specials   'muse-xml-decide-specials
-                     :after      'muse-xml-finalize-buffer
-                     :header     'muse-xml-header
-                     :footer     'muse-xml-footer
-                     :browser    'find-file))
+(muse-define-style "xml"
+                   :suffix     'muse-xml-extension
+                   :regexps    'muse-xml-markup-regexps
+                   :functions  'muse-xml-markup-functions
+                   :strings    'muse-xml-markup-strings
+                   :specials   'muse-xml-decide-specials
+                   :after      'muse-xml-finalize-buffer
+                   :header     'muse-xml-header
+                   :footer     'muse-xml-footer
+                   :browser    'find-file)
 
 (provide 'muse-xml)
 

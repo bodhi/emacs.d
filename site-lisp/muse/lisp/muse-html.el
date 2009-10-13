@@ -1,12 +1,13 @@
 ;;; muse-html.el --- publish to HTML and XHTML
 
-;; Copyright (C) 2004, 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -27,6 +28,15 @@
 ;; appending an 'encoding="..."' fragment to the first line of the
 ;; sample publishing header so that when editing the resulting XHTML
 ;; file, Emacs would use the proper encoding.
+
+;; Sun Jiyang (sunyijiang AT gmail DOT com) came up with the idea for
+;; the <src> tag and provided an implementation for emacs-wiki.
+
+;; Charles Wang (wcy123 AT gmail DOT com) provided an initial
+;; implementation of the <src> tag for Muse.
+
+;; Clinton Ebadi (clinton AT unknownlamer DOT org) provided further
+;; ideas for the implementation of the <src> tag.
 
 ;;; Code:
 
@@ -204,7 +214,7 @@ header style is different from your link style."
 (defcustom muse-html-table-attributes
   " class=\"muse-table\" border=\"2\" cellpadding=\"5\""
   "The attribute to be used with HTML <table> tags.
-Note that since Muse supports insertion of raw HTML tags, as long
+Note that Muse supports insertion of raw HTML tags, as long
 as you wrap the region in <literal></literal>."
   :type 'string
   :group 'muse-html)
@@ -252,12 +262,14 @@ For more on the structure of this list, see
     (link            . "<a href=\"%s\">%s</a>")
     (link-and-anchor . "<a href=\"%s#%s\">%s</a>")
     (email-addr      . "<a href=\"mailto:%s\">%s</a>")
+    (anchor          . "<a name=\"%1%\" id=\"%1%\">")
     (emdash          . "%s&mdash;%s")
     (comment-begin   . "<!-- ")
     (comment-end     . " -->")
     (rule            . "<hr>")
     (fn-sep          . "<hr>\n")
     (no-break-space  . "&nbsp;")
+    (line-break      . "<br>")
     (enddots         . "....")
     (dots            . "...")
     (section         . "<h2>")
@@ -272,6 +284,10 @@ For more on the structure of this list, see
     (end-underline   . "</u>")
     (begin-literal   . "<code>")
     (end-literal     . "</code>")
+    (begin-cite      . "<span class=\"citation\">")
+    (begin-cite-author . "<span class=\"citation-author\">")
+    (begin-cite-year . "<span class=\"citation-year\">")
+    (end-cite        . "</span>")
     (begin-emph      . "<em>")
     (end-emph        . "</em>")
     (begin-more-emph . "<strong>")
@@ -328,6 +344,7 @@ differs little between the various styles."
 <img src=\"%s.%s\" alt=\"\" /></a>")
     (rule            . "<hr />")
     (fn-sep          . "<hr />\n")
+    (line-break      . "<br />")
     (begin-underline . "<span style=\"text-decoration: underline;\">")
     (end-underline   . "</span>")
     (begin-center    . "<p style=\"text-align: center;\">\n")
@@ -344,12 +361,26 @@ searched."
   :type '(alist :key-type symbol :value-type string)
   :group 'muse-html)
 
+(defcustom muse-xhtml1.1-markup-strings
+  '((anchor          . "<a id=\"%s\">"))
+  "Strings used for marking up text as XHTML 1.1.
+These cover the most basic kinds of markup, the handling of which
+differs little between the various styles.
+
+If a markup rule is not found here, `muse-xhtml-markup-strings'
+and `muse-html-markup-strings' are searched."
+  :type '(alist :key-type symbol :value-type string)
+  :group 'muse-html)
+
 (defcustom muse-html-markup-tags
-  '(("class" t t muse-html-class-tag))
-  "A list of tag specifications, for specially marking up HTML."
+  '(("class" t t   t muse-html-class-tag)
+    ("div"   t t   t muse-html-div-tag)
+    ("src"   t t nil muse-html-src-tag))
+ "A list of tag specifications, for specially marking up HTML."
   :type '(repeat (list (string :tag "Markup tag")
                        (boolean :tag "Expect closing tag" :value t)
                        (boolean :tag "Parse attributes" :value nil)
+                       (boolean :tag "Nestable" :value nil)
                        function))
   :group 'muse-html)
 
@@ -387,20 +418,31 @@ This will be used if no special characters are found."
   :type 'string
   :group 'muse-html)
 
+(defcustom muse-html-src-allowed-modes t
+  "Modes that we allow the <src> tag to colorize.
+If t, permit the <src> tag to colorize any mode.
+
+If a list of mode names, such as '(\"html\" \"latex\"), and the
+lang argument to <src> is not in the list, then use fundamental
+mode instead."
+  :type '(choice (const :tag "Any" t)
+                 (repeat (string :tag "Mode")))
+  :group 'muse-html)
+
 (defun muse-html-insert-anchor (anchor)
   "Insert an anchor, either around the word at point, or within a tag."
   (skip-chars-forward (concat muse-regexp-blank "\n"))
   (if (looking-at (concat "<\\([^" muse-regexp-blank "/>\n]+\\)>"))
       (let ((tag (match-string 1)))
         (goto-char (match-end 0))
-        (muse-insert-markup "<a name=\"" anchor "\" id=\"" anchor "\">")
+        (muse-insert-markup (muse-markup-text 'anchor anchor))
         (when muse-html-anchor-on-word
           (or (and (search-forward (format "</%s>" tag)
                                    (muse-line-end-position) t)
                    (goto-char (match-beginning 0)))
               (forward-word 1)))
         (muse-insert-markup "</a>"))
-    (muse-insert-markup "<a name=\"" anchor "\" id=\"" anchor "\">")
+    (muse-insert-markup (muse-markup-text 'anchor anchor))
     (when muse-html-anchor-on-word
       (forward-word 1))
     (muse-insert-markup "</a>\n")))
@@ -416,16 +458,22 @@ This will be used if no special characters are found."
     (goto-char (match-beginning 0))
     (when (save-excursion
             (save-match-data
-              (and (re-search-backward "<\\(/?\\)p[ >]" nil t)
+              (and (not (get-text-property (max (point-min) (1- (point)))
+                                           'muse-no-paragraph))
+                   (re-search-backward "<\\(/?\\)p[ >]" nil t)
                    (not (string-equal (match-string 1) "/")))))
-      (when (get-text-property (1- (point)) 'end-list)
-        (goto-char (previous-single-property-change (1- (point)) 'end-list)))
+      (when (get-text-property (1- (point)) 'muse-end-list)
+        (goto-char (previous-single-property-change (1- (point))
+                                                    'muse-end-list)))
       (muse-insert-markup "</p>"))
     (goto-char end))
   (cond
    ((eobp)
     (unless (bolp)
       (insert "\n")))
+   ((get-text-property (point) 'muse-no-paragraph)
+    (forward-char 1)
+    nil)
    ((eq (char-after) ?\<)
     (cond
      ((looking-at "<\\(em\\|strong\\|code\\|span\\)[ >]")
@@ -453,7 +501,8 @@ This will be used if no special characters are found."
         (let ((text (match-string 1)))
           (muse-insert-markup
            (concat "<p class=\"footnote\">"
-                   "<a name=\"fn." text "\" href=\"#fnr." text "\">"
+                   "<a class=\"footnum\" name=\"fn." text
+                   "\" href=\"#fnr." text "\">"
                    text ".</a>")))
       (save-excursion
         (save-match-data
@@ -470,7 +519,8 @@ This will be used if no special characters are found."
       (replace-match "")))
    (t (let ((text (match-string 1)))
         (muse-insert-markup
-         (concat "<sup><a name=\"fnr." text "\" href=\"#fn." text "\">"
+         (concat "<sup><a class=\"footref\" name=\"fnr." text
+                 "\" href=\"#fn." text "\">"
                  text "</a></sup>")))
       (replace-match ""))))
 
@@ -479,24 +529,44 @@ This will be used if no special characters are found."
 
 ;; Handling of tags for HTML
 
+(defun muse-html-strip-links (string)
+  "Remove all HTML links from STRING."
+  (muse-replace-regexp-in-string "\\(<a .*?>\\|</a>\\)" "" string nil t))
+
 (defun muse-html-insert-contents (depth)
+  "Scan the current document and generate a table of contents at point.
+DEPTH indicates how many levels of headings to include.  The default is 2."
   (let ((max-depth (or depth 2))
         (index 1)
-        base contents l)
+        base contents l end)
     (save-excursion
       (goto-char (point-min))
       (search-forward "Page published by Emacs Muse begins here" nil t)
       (catch 'done
-        (while (re-search-forward "^<h\\([0-9]+\\)>\\(.+?\\)</h\\1>" nil t)
-          (unless (get-text-property (point) 'read-only)
+        (while (re-search-forward "<h\\([0-9]+\\)>\\(.+?\\)</h\\1>$" nil t)
+          (unless (and (get-text-property (point) 'read-only)
+                       (not (get-text-property (match-beginning 0)
+                                               'muse-contents)))
+            (remove-text-properties (match-beginning 0) (match-end 0)
+                                    '(muse-contents nil))
             (setq l (1- (string-to-number (match-string 1))))
             (if (null base)
                 (setq base l)
               (if (< l base)
                   (throw 'done t)))
             (when (<= l max-depth)
-              (setq contents (cons (cons l (muse-match-string-no-properties 2))
+              ;; escape specials now before copying the text, so that we
+              ;; can deal sanely with both emphasis in titles and
+              ;; special characters
+              (goto-char (match-end 2))
+              (setq end (point-marker))
+              (muse-publish-escape-specials (match-beginning 2) end
+                                            nil 'document)
+              (muse-publish-mark-read-only (match-beginning 2) end)
+              (setq contents (cons (cons l (buffer-substring-no-properties
+                                            (match-beginning 2) end))
                                    contents))
+              (set-marker end nil)
               (goto-char (match-beginning 2))
               (muse-html-insert-anchor (concat "sec" (int-to-string index)))
               (setq index (1+ index)))))))
@@ -506,7 +576,7 @@ This will be used if no special characters are found."
       (while contents
         (muse-insert-markup "<dt>\n"
                             "<a href=\"#sec" (int-to-string index) "\">"
-                            (muse-publish-strip-tags (cdar contents))
+                            (muse-html-strip-links (cdar contents))
                             "</a>\n"
                             "</dt>\n")
         (setq index (1+ index)
@@ -529,11 +599,87 @@ This will be used if no special characters are found."
       (muse-insert-markup "</dl>\n</div>\n")
       (muse-publish-mark-read-only p (point)))))
 
+(defun muse-html-denote-headings ()
+  "Place a text property on any headings in the current buffer.
+This allows the headings to be picked up later on if publishing a
+table of contents."
+  (save-excursion
+    (goto-char (point-min))
+    (search-forward "Page published by Emacs Muse begins here" nil t)
+    (while (re-search-forward "<h\\([0-9]+\\)>\\(.+?\\)</h\\1>$" nil t)
+      (unless (get-text-property (point) 'read-only)
+        (add-text-properties (match-beginning 0) (match-end 0)
+                             '(muse-contents t))))))
+
 (defun muse-html-class-tag (beg end attrs)
-  (goto-char beg)
-  (muse-insert-markup "<span class=\"" (cdr (assoc "name" attrs)) "\">")
-  (goto-char end)
-  (muse-insert-markup "</span>"))
+  (let ((name (cdr (assoc "name" attrs))))
+    (when name
+      (goto-char beg)
+      (muse-insert-markup "<span class=\"" name "\">")
+      (save-excursion
+        (goto-char end)
+        (muse-insert-markup "</span>")))))
+
+(defun muse-html-div-tag (beg end attrs)
+  "Publish a <div> tag for HTML."
+  (let ((id (cdr (assoc "id" attrs)))
+        (style (cdr (assoc "style" attrs))))
+    (when (or id style)
+      (goto-char beg)
+      (if (null id)
+          (muse-insert-markup "<div style=\"" style "\">")
+        (muse-insert-markup "<div id=\"" id "\">"))
+      (save-excursion
+        (goto-char end)
+        (muse-insert-markup "</div>")))))
+
+(defun muse-html-src-tag (beg end attrs)
+  "Publish the region using htmlize.
+The language to use may be specified by the \"lang\" attribute.
+
+Muse will look for a function named LANG-mode, where LANG is the
+value of the \"lang\" attribute.
+
+This tag requires htmlize 1.34 or later in order to work."
+  (if (condition-case nil
+          (progn
+            (require 'htmlize)
+            (if (fboundp 'htmlize-region-for-paste)
+                nil
+              (muse-display-warning
+               (concat "The `htmlize-region-for-paste' function was not"
+                       " found.\nThis is available in htmlize.el 1.34"
+                       " or later."))
+              t))
+        (error nil t))
+      ;; if htmlize.el was not found, treat this like an example tag
+      (muse-publish-example-tag beg end)
+    (muse-publish-ensure-block beg end)
+    (let* ((lang (cdr (assoc "lang" attrs)))
+           (mode (or (and (not (eq muse-html-src-allowed-modes t))
+                          (not (member lang muse-html-src-allowed-modes))
+                          'fundamental-mode)
+                     (intern-soft (concat lang "-mode"))))
+           (text (muse-delete-and-extract-region beg end))
+           (htmltext
+            (with-temp-buffer
+              (insert text)
+              (if (functionp mode)
+                  (funcall mode)
+                (fundamental-mode))
+              (font-lock-fontify-buffer)
+              ;; silence the byte-compiler
+              (when (fboundp 'htmlize-region-for-paste)
+                ;; transform the region to HTML
+                (htmlize-region-for-paste (point-min) (point-max))))))
+      (save-restriction
+        (narrow-to-region (point) (point))
+        (insert htmltext)
+        (goto-char (point-min))
+        (re-search-forward "<pre\\([^>]*\\)>\n?" nil t)
+        (replace-match "<pre class=\"src\">")
+        (goto-char (point-max))
+        (muse-publish-mark-read-only (point-min) (point-max))))))
 
 ;; Register the Muse HTML Publisher
 
@@ -558,38 +704,50 @@ This will be used if no special characters are found."
          (concat muse-html-meta-content-type "; charset="
                  (muse-html-encoding)))))
 
+(defun muse-html-munge-buffer ()
+  (if muse-publish-generate-contents
+      (progn
+        (goto-char (car muse-publish-generate-contents))
+        (muse-html-insert-contents (cdr muse-publish-generate-contents))
+        (setq muse-publish-generate-contents nil))
+    (muse-html-denote-headings)))
+
 (defun muse-html-finalize-buffer ()
-  (when muse-publish-generate-contents
-    (goto-char (car muse-publish-generate-contents))
-    (muse-html-insert-contents (cdr muse-publish-generate-contents)))
   (when (and (boundp 'buffer-file-coding-system)
              (memq buffer-file-coding-system '(no-conversion undecided-unix)))
     ;; make it agree with the default charset
-    (setq buffer-file-coding-system muse-html-encoding-default))
-  ;; stop processing the :after functions
-  t)
+    (setq buffer-file-coding-system muse-html-encoding-default)))
 
-(unless (assoc "html" muse-publishing-styles)
-  (muse-define-style "html"
-                     :suffix    'muse-html-extension
-                     :regexps   'muse-html-markup-regexps
-                     :functions 'muse-html-markup-functions
-                     :strings   'muse-html-markup-strings
-                     :tags      'muse-html-markup-tags
-                     :specials  'muse-xml-decide-specials
-                     :before    'muse-html-prepare-buffer
-                     :after     'muse-html-finalize-buffer
-                     :header    'muse-html-header
-                     :footer    'muse-html-footer
-                     :style-sheet 'muse-html-style-sheet
-                     :browser   'muse-html-browse-file)
+;;; Register the Muse HTML and XHTML Publishers
 
-  (muse-derive-style "xhtml" "html"
-                     :suffix    'muse-xhtml-extension
-                     :strings   'muse-xhtml-markup-strings
-                     :header    'muse-xhtml-header
-                     :footer    'muse-xhtml-footer
-                     :style-sheet 'muse-xhtml-style-sheet))
+(muse-define-style "html"
+                   :suffix    'muse-html-extension
+                   :regexps   'muse-html-markup-regexps
+                   :functions 'muse-html-markup-functions
+                   :strings   'muse-html-markup-strings
+                   :tags      'muse-html-markup-tags
+                   :specials  'muse-xml-decide-specials
+                   :before    'muse-html-prepare-buffer
+                   :before-end 'muse-html-munge-buffer
+                   :after     'muse-html-finalize-buffer
+                   :header    'muse-html-header
+                   :footer    'muse-html-footer
+                   :style-sheet 'muse-html-style-sheet
+                   :browser   'muse-html-browse-file)
+
+(muse-derive-style "xhtml" "html"
+                   :suffix    'muse-xhtml-extension
+                   :strings   'muse-xhtml-markup-strings
+                   :header    'muse-xhtml-header
+                   :footer    'muse-xhtml-footer
+                   :style-sheet 'muse-xhtml-style-sheet)
+
+;; xhtml1.0 is an alias for xhtml
+(muse-derive-style "xhtml1.0" "xhtml")
+
+;; xhtml1.1 has some quirks that need attention from us
+(muse-derive-style "xhtml1.1" "xhtml"
+                   :strings   'muse-xhtml1.1-markup-strings)
 
 (provide 'muse-html)
 

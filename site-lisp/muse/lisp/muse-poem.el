@@ -1,12 +1,13 @@
 ;;; muse-poem.el --- publish a poem to LaTex or PDF
 
-;; Copyright (C) 2004, 2005 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -190,7 +191,7 @@ differs little between the various styles."
       (forward-line 1))
     nil))
 
-(defvar muse-poem-tag '("poem" nil t muse-poem-markup-tag))
+(defvar muse-poem-tag '("poem" nil t nil muse-poem-markup-tag))
 
 (defun muse-poem-markup-tag (beg end attrs)
   "This markup tag allows a poem to be included from another project page.
@@ -205,7 +206,7 @@ The form of usage is:
       (setq beg (point))
       (insert
        (muse-with-temp-buffer
-         (insert-file-contents page)
+         (muse-insert-file-contents page)
          (goto-char (point-min))
          (if (assoc "nohead" attrs)
              (progn
@@ -224,34 +225,38 @@ The form of usage is:
         (forward-line 2))
       (while (< (point) end)
         (insert "> ")
-        (forward-line 1)))))
+        (forward-line 1))
+      (set-marker end nil))))
+
+(put 'muse-poem-markup-tag 'muse-dangerous-tag t)
 
 (add-to-list 'muse-publish-markup-tags muse-poem-tag)
 
-(unless (assoc "poem-latex" muse-publishing-styles)
-  (muse-derive-style "poem-latex" "latex"
-                     :before  'muse-poem-prepare-buffer
-                     :strings 'muse-poem-markup-strings
-                     :header  'muse-poem-latex-header
-                     :footer  'muse-poem-latex-footer)
+;;; Register the Muse POEM Publishers
 
-  (muse-derive-style "poem-pdf" "pdf"
-                     :before  'muse-poem-prepare-buffer
-                     :strings 'muse-poem-markup-strings
-                     :header  'muse-poem-latex-header
-                     :footer  'muse-poem-latex-footer)
+(muse-derive-style "poem-latex" "latex"
+                   :before  'muse-poem-prepare-buffer
+                   :strings 'muse-poem-markup-strings
+                   :header  'muse-poem-latex-header
+                   :footer  'muse-poem-latex-footer)
 
-  (muse-derive-style "chapbook-latex" "latex"
-                     :before  'muse-poem-prepare-buffer
-                     :strings 'muse-poem-chapbook-strings
-                     :header  'muse-chapbook-latex-header
-                     :footer  'muse-chapbook-latex-footer)
+(muse-derive-style "poem-pdf" "pdf"
+                   :before  'muse-poem-prepare-buffer
+                   :strings 'muse-poem-markup-strings
+                   :header  'muse-poem-latex-header
+                   :footer  'muse-poem-latex-footer)
 
-  (muse-derive-style "chapbook-pdf" "pdf"
-                     :before  'muse-poem-prepare-buffer
-                     :strings 'muse-poem-chapbook-strings
-                     :header  'muse-chapbook-latex-header
-                     :footer  'muse-chapbook-latex-footer))
+(muse-derive-style "chapbook-latex" "latex"
+                   :before  'muse-poem-prepare-buffer
+                   :strings 'muse-poem-chapbook-strings
+                   :header  'muse-chapbook-latex-header
+                   :footer  'muse-chapbook-latex-footer)
+
+(muse-derive-style "chapbook-pdf" "pdf"
+                   :before  'muse-poem-prepare-buffer
+                   :strings 'muse-poem-chapbook-strings
+                   :header  'muse-chapbook-latex-header
+                   :footer  'muse-chapbook-latex-footer)
 
 (provide 'muse-poem)
 

@@ -1,12 +1,13 @@
 ;;; muse-docbook.el --- publish DocBook files
 
-;; Copyright (C) 2004, 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -52,7 +53,7 @@ See `muse-docbook' for more information."
   "<?xml version=\"1.0\" encoding=\"<lisp>
   (muse-docbook-encoding)</lisp>\"?>
 <!DOCTYPE article PUBLIC \"-//OASIS//DTD DocBook V4.2//EN\"
-                  \"http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd\">
+                  \"http://www.oasis-open.org/docbook/xml/4.2/docbookx.dtd\"<lisp>(muse-docbook-entities)</lisp>>
 <article>
   <articleinfo>
     <title><lisp>(muse-publishing-directive \"title\")</lisp></title>
@@ -68,7 +69,7 @@ This may be text or a filename."
 
 (defcustom muse-docbook-footer "
   <!-- Page published by Emacs Muse ends here -->
-</article>\n"
+<lisp>(muse-docbook-bibliography)</lisp></article>\n"
   "Footer used for publishing DocBook XML files.
 This may be text or a filename."
   :type 'string
@@ -156,6 +157,10 @@ For more on the structure of this list, see
     (end-center      . "\n</para>")
     (begin-quote     . "<blockquote>\n")
     (end-quote       . "\n</blockquote>")
+    (begin-cite      . "<citation role=\"%s\">")
+    (begin-cite-author . "<citation role=\"%s\">A:")
+    (begin-cite-year . "<citation role=\"%s\">Y:")
+    (end-cite        . "</citation>")
     (begin-quote-item . "<para>")
     (end-quote-item  . "</para>")
     (begin-uli       . "<itemizedlist mark=\"bullet\">\n")
@@ -208,30 +213,46 @@ found in `muse-docbook-encoding-map'."
    muse-docbook-charset-default))
 
 (defun muse-docbook-markup-paragraph ()
-  (let ((end (copy-marker (match-end 0) t)))
-    (goto-char (match-beginning 0))
-    (when (save-excursion
-            (save-match-data
-              (and (re-search-backward "<\\(/?\\)\\(para\\|footnote\\)[ >]"
-                                       nil t)
-                   (or (and (string= (match-string 2) "para")
-                            (not (string= (match-string 1) "/")))
-                       (and (string= (match-string 2) "footnote")
-                            (string= (match-string 1) "/"))))))
-      (when (get-text-property (1- (point)) 'end-list)
-        (goto-char (previous-single-property-change (1- (point)) 'end-list)))
-      (muse-insert-markup "</para>"))
-    (goto-char end))
-  (cond
-   ((eobp)
-    (unless (bolp)
-      (insert "\n")))
-   ((eq (char-after) ?\<)
-    (when (looking-at (concat "<\\(emphasis\\|systemitem\\|inlinemediaobject"
-                              "\\|u?link\\|anchor\\|email\\)[ >]"))
-      (muse-insert-markup "<para>")))
-   (t
-    (muse-insert-markup "<para>"))))
+  (catch 'bail-out
+    (let ((end (copy-marker (match-end 0) t)))
+      (goto-char (match-beginning 0))
+      (when (save-excursion
+              (save-match-data
+                (and (not (get-text-property (max (point-min) (1- (point)))
+                                             'muse-no-paragraph))
+                     (re-search-backward
+                      "<\\(/?\\)\\(para\\|footnote\\|literallayout\\)[ >]"
+                      nil t)
+                     (cond ((string= (match-string 2) "literallayout")
+                            (and (not (string= (match-string 1) "/"))
+                                 (throw 'bail-out t)))
+                           ((string= (match-string 2) "para")
+                            (and
+                             (not (string= (match-string 1) "/"))
+                             ;; don't mess up nested lists
+                             (not (and (muse-looking-back "<listitem>")
+                                       (throw 'bail-out t)))))
+                           ((string= (match-string 2) "footnote")
+                            (string= (match-string 1) "/"))
+                           (t nil)))))
+        (when (get-text-property (1- (point)) 'muse-end-list)
+          (goto-char (previous-single-property-change (1- (point))
+                                                      'muse-end-list)))
+        (muse-insert-markup "</para>"))
+      (goto-char end))
+    (cond
+     ((eobp)
+      (unless (bolp)
+        (insert "\n")))
+     ((get-text-property (point) 'muse-no-paragraph)
+      (forward-char 1)
+      nil)
+     ((eq (char-after) ?\<)
+      (when (looking-at (concat "<\\(emphasis\\|systemitem\\|inlinemediaobject"
+                                "\\|u?link\\|anchor\\|email\\)[ >]"))
+        (muse-insert-markup "<para>")))
+     (t
+      (muse-insert-markup "<para>")))))
 
 (defun muse-docbook-get-author (&optional author)
   "Split the AUTHOR directive into separate fields.
@@ -267,26 +288,64 @@ and anything after `Firstname' is optional."
                             nil t)
     (replace-match (upcase (match-string 1)) t t nil 1)))
 
-(defun muse-docbook-finalize-buffer ()
+(defun muse-docbook-fixup-citations ()
+  ;; remove the role attribute if there is no role
+  (goto-char (point-min))
+  (while (re-search-forward "<\\(citation role=\"nil\"\\)>" nil t)
+    (replace-match "citation" t t nil 1))
+  ;; replace colons in multi-head citations with semicolons
+  (goto-char (point-min))
+  (while (re-search-forward "<citation.*>" nil t)
+    (let ((start (point))
+          (end (re-search-forward "</citation>")))
+      (save-restriction
+        (narrow-to-region start end)
+        (goto-char (point-min))
+        (while (re-search-forward "," nil t)
+          (replace-match ";"))))))
+
+(defun muse-docbook-munge-buffer ()
   (muse-docbook-fixup-images)
+  (muse-docbook-fixup-citations))
+
+(defun muse-docbook-entities ()
+  (save-excursion
+    (goto-char (point-min))
+    (if (re-search-forward "<citation" nil t)
+        (concat
+         " [\n<!ENTITY bibliography SYSTEM \""
+         (if (string-match ".short$" (muse-page-name))
+             (substring (muse-page-name) 0 -6)
+           (muse-page-name))
+         ".bib.xml\">\n]")
+      "")))
+
+(defun muse-docbook-bibliography ()
+  (save-excursion
+    (goto-char (point-min))
+    (if (re-search-forward "<citation" nil t)
+        "&bibliography;\n"
+      "")))
+
+(defun muse-docbook-finalize-buffer ()
   (when (boundp 'buffer-file-coding-system)
     (when (memq buffer-file-coding-system '(no-conversion undecided-unix))
       ;; make it agree with the default charset
       (setq buffer-file-coding-system muse-docbook-encoding-default))))
 
-;; Register the Muse DocBook XML Publisher
+;;; Register the Muse DocBook XML Publisher
 
-(unless (assoc "docbook" muse-publishing-styles)
-  (muse-define-style "docbook"
-                     :suffix     'muse-docbook-extension
-                     :regexps    'muse-docbook-markup-regexps
-                     :functions  'muse-docbook-markup-functions
-                     :strings    'muse-docbook-markup-strings
-                     :specials   'muse-xml-decide-specials
-                     :after      'muse-docbook-finalize-buffer
-                     :header     'muse-docbook-header
-                     :footer     'muse-docbook-footer
-                     :browser    'find-file))
+(muse-define-style "docbook"
+                   :suffix     'muse-docbook-extension
+                   :regexps    'muse-docbook-markup-regexps
+                   :functions  'muse-docbook-markup-functions
+                   :strings    'muse-docbook-markup-strings
+                   :specials   'muse-xml-decide-specials
+                   :before-end 'muse-docbook-munge-buffer
+                   :after      'muse-docbook-finalize-buffer
+                   :header     'muse-docbook-header
+                   :footer     'muse-docbook-footer
+                   :browser    'find-file)
 
 (provide 'muse-docbook)
 

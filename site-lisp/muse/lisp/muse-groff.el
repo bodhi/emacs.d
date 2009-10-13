@@ -1,6 +1,7 @@
 ;;; muse-groff.el --- publish groff -mom -mwww files
 
-;; Copyright (C) 2005 Free Software Foundation, Inc.
+;; Copyright (C) 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; Author: Andrew J. Korty (ajk AT iu DOT edu)
 ;; Date: Tue 5-Jul-2005
@@ -9,7 +10,7 @@
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -102,6 +103,7 @@ For more on the structure of this list, see
   :type '(repeat (list (string :tag "Markup tag")
                        (boolean :tag "Expect closing tag" :value t)
                        (boolean :tag "Parse attributes" :value nil)
+                       (boolean :tag "Nestable" :value nil)
                        function))
   :group 'muse-groff)
 
@@ -115,6 +117,7 @@ For more on the structure of this list, see
     (emdash          . "\\(em")
     (rule            . "\n.RULE\n")
     (no-break-space  . "\\h")
+    (line-break      . "\\p")
     (enddots         . "....")
     (dots            . "...")
 ;;     (part            . "\\part{")
@@ -152,6 +155,10 @@ For more on the structure of this list, see
     (end-example     . ".QUOTE OFF")
     (begin-quote     . ".BLOCKQUOTE")
     (end-quote       . ".BLOCKQUOTE OFF")
+    (begin-cite     . "")
+    (begin-cite-author . "")
+    (begin-cite-year . "")
+    (end-cite        . "")
     (begin-uli       . ".list BULLET\n.SHIFT_LIST 2m\n.ITEM\n")
     (end-uli         . "\n.LIST OFF")
     (begin-oli       . ".list DIGIT\n.SHIFT_LIST 2m\n.ITEM\n")
@@ -215,7 +222,7 @@ command characters."
   (goto-char (point-min))
   (muse-groff-protect-leading-chars))
 
-(defun muse-groff-finalize-buffer ()
+(defun muse-groff-munge-buffer ()
   (goto-char (point-min))
   (muse-groff-concat-lists))
 
@@ -238,24 +245,25 @@ command characters."
         (shell-command command))))
    ".ps"))
 
-(unless (assoc "groff" muse-publishing-styles)
-  (muse-define-style "groff"
-                     :suffix    'muse-groff-extension
-                     :regexps   'muse-groff-markup-regexps
-;;;		     :functions 'muse-groff-markup-functions
-                     :strings   'muse-groff-markup-strings
-                     :tags      'muse-groff-markup-tags
-                     :specials  'muse-groff-markup-specials
-                     :before    'muse-groff-prepare-buffer
-                     :after     'muse-groff-finalize-buffer
-                     :header    'muse-groff-header
-                     :footer    'muse-groff-footer
-                     :browser   'find-file)
+;;; Register the Muse GROFF Publisher
 
-  (muse-derive-style "groff-pdf" "groff"
-                     :final   'muse-groff-pdf-generate
-                     :browser 'muse-groff-pdf-browse-file
-                     :osuffix 'muse-groff-pdf-extension))
+(muse-define-style "groff"
+                   :suffix    'muse-groff-extension
+                   :regexps   'muse-groff-markup-regexps
+;;;		   :functions 'muse-groff-markup-functions
+                   :strings   'muse-groff-markup-strings
+                   :tags      'muse-groff-markup-tags
+                   :specials  'muse-groff-markup-specials
+                   :before    'muse-groff-prepare-buffer
+                   :before-end 'muse-groff-munge-buffer
+                   :header    'muse-groff-header
+                   :footer    'muse-groff-footer
+                   :browser   'find-file)
+
+(muse-derive-style "groff-pdf" "groff"
+                   :final   'muse-groff-pdf-generate
+                   :browser 'muse-groff-pdf-browse-file
+                   :osuffix 'muse-groff-pdf-extension)
 
 (provide 'muse-groff)
 

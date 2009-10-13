@@ -1,13 +1,15 @@
-.PHONY: all lisp contrib autoloads examples experimental doc clean realclean
-.PHONY: distclean fullclean install-info install-bin install test dist release
-.PHONY: debbuild debrevision debrelease upload
-.PRECIOUS: %.info %.html
+.PHONY: all lisp contrib autoloads examples experimental doc info-only
+.PHONY: clean realclean distclean fullclean install-info install-bin install
+.PHONY: test dist release upload elpa
 
-include Makefile.defs
+DEFS = $(shell test -f Makefile.defs && echo Makefile.defs \
+	|| echo Makefile.defs.default)
 
-SUBDIRS = lisp contrib examples experimental
+include $(DEFS)
 
-all: autoloads lisp contrib $(MANUAL).info
+SUBDIRS = lisp contrib examples experimental texi
+
+all: autoloads lisp contrib info-only
 
 lisp:
 	(cd lisp && $(MAKE))
@@ -24,27 +26,22 @@ examples:
 experimental:
 	(cd experimental && $(MAKE))
 
-%.info: %.texi
-	makeinfo $<
+info-only:
+	(cd texi && $(MAKE) info-only)
 
-%.html: %.texi
-	makeinfo --html --no-split $<
-
-doc: $(MANUAL).info $(MANUAL).html
+doc texi:
+	(cd texi && $(MAKE))
 
 clean:
 	for i in $(SUBDIRS); do \
 	 (cd $$i && $(MAKE) clean); done
 
 realclean fullclean: clean
-	-rm -f $(MANUAL).info $(MANUAL).html
 	for i in $(SUBDIRS); do \
 	 (cd $$i && $(MAKE) realclean); done
 
-install-info: $(MANUAL).info
-	[ -d $(INFODIR) ] || install -d $(INFODIR)
-	install -m 0644 $(MANUAL).info $(INFODIR)/$(MANUAL)
-	$(INSTALLINFO) $(INFODIR)/$(MANUAL)
+install-info:
+	(cd texi && $(MAKE) install)
 
 install-bin: autoloads lisp contrib
 	(cd lisp && $(MAKE) install)
@@ -57,17 +54,15 @@ test:
 	(cd lisp && $(MAKE) test)
 
 distclean:
-	-rm -f $(MANUAL).info $(MANUAL).html
 	for i in $(SUBDIRS); do \
 	 (cd $$i && $(MAKE) distclean); done
 	-rm -fr ../$(PROJECT)-$(VERSION)
 
 dist: autoloads distclean
-	tla inventory -sB | tar -cf - --no-recursion -T- | \
-	  (mkdir -p ../$(PROJECT)-$(VERSION); cd ../$(PROJECT)-$(VERSION) && \
-	  tar xf -)
+	git archive --format=tar --prefix=$(PROJECT)-$(VERSION)/ HEAD | \
+	  (cd .. && tar xf -)
+	rm -f ../$(PROJECT)-$(VERSION)/.gitignore
 	cp lisp/$(PROJECT)-autoloads.el ../$(PROJECT)-$(VERSION)/lisp
-	rm -fr ../$(PROJECT)-$(VERSION)/debian
 
 release: dist
 	(cd .. && tar -czf $(PROJECT)-$(VERSION).tar.gz \
@@ -76,37 +71,26 @@ release: dist
 	  gpg --detach $(PROJECT)-$(VERSION).tar.gz && \
 	  gpg --detach $(PROJECT)-$(VERSION).zip)
 
-debbuild:
-	(cd ../$(DEBNAME)-$(VERSION) && \
-	  dpkg-buildpackage -v$(LASTUPLOAD) $(BUILDOPTS) \
-	    -us -uc -rfakeroot && \
-	  echo "Running lintian ..." && \
-	  lintian -i ../$(DEBNAME)_$(VERSION)*.deb || : && \
-	  echo "Done running lintian." && \
-	  debsign)
-	cp ../$(DEBNAME)_$(VERSION)* ../../dist
-
-debrevision: dist
-	-rm -f ../../dist/$(DEBNAME)_*
-	-rm -f ../$(DEBNAME)_$(VERSION)-*
-	-rm -fr ../$(DEBNAME)-$(VERSION)
-	mv ../$(PROJECT)-$(VERSION) ../$(DEBNAME)-$(VERSION)
-	cp -r debian ../$(DEBNAME)-$(VERSION)
-	-rm -fr ../$(DEBNAME)-$(VERSION)/debian/.arch-ids
-	$(MAKE) debbuild
-
-debrelease: dist
-	-rm -f ../../dist/$(DEBNAME)_*
-	-rm -f ../$(DEBNAME)_$(VERSION)*
-	-rm -fr ../$(DEBNAME)-$(VERSION)
-	mv ../$(PROJECT)-$(VERSION) ../$(DEBNAME)-$(VERSION)
-	(cd .. && tar -czf $(DEBNAME)_$(VERSION).orig.tar.gz \
-	    $(DEBNAME)-$(VERSION))
-	cp -r debian ../$(DEBNAME)-$(VERSION)
-	-rm -fr ../$(DEBNAME)-$(VERSION)/debian/.arch-ids
-	$(MAKE) debbuild
-
-upload: release
+upload:
 	(cd .. && \
 	  scp $(PROJECT)-$(VERSION).zip* $(PROJECT)-$(VERSION).tar.gz* \
 	    mwolson@download.gna.org:/upload/muse-el)
+
+elpa: realclean info-only
+	rm -fR $(ELPADIR)/$(PROJECT)-$(VERSION)
+	rm -f $(ELPADIR)/$(PROJECT)-$(VERSION).tar
+	mkdir -p $(ELPADIR)/$(PROJECT)-$(VERSION)
+	cp lisp/*.el $(ELPADIR)/$(PROJECT)-$(VERSION)
+	cp contrib/*.el $(ELPADIR)/$(PROJECT)-$(VERSION)
+	echo '(define-package "$(PROJECT)" "$(VERSION)"' > \
+	  $(ELPADIR)/$(PROJECT)-$(VERSION)/$(PROJECT)-pkg.el
+	echo '  "$(ELPADESC)")' >> \
+	  $(ELPADIR)/$(PROJECT)-$(VERSION)/$(PROJECT)-pkg.el
+	cp texi/$(MANUAL).info $(ELPADIR)/$(PROJECT)-$(VERSION)
+	cp texi/dir-template $(ELPADIR)/$(PROJECT)-$(VERSION)/dir
+	install-info --section "Emacs" "Emacs" \
+	  --info-dir=$(ELPADIR)/$(PROJECT)-$(VERSION) \
+	  $(ELPADIR)/$(PROJECT)-$(VERSION)/$(MANUAL).info
+	rm -f $(ELPADIR)/$(PROJECT)-$(VERSION)/dir.old
+	(cd $(ELPADIR) && tar cf $(PROJECT)-$(VERSION).tar \
+	  $(PROJECT)-$(VERSION))

@@ -1,12 +1,13 @@
 ;;; muse-journal.el --- keep and publish a journal
 
-;; Copyright (C) 2004, 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -140,7 +141,8 @@ and group 3 is the optional heading for the entry."
     </div>
   </div>
 </div>\n\n"
-  "Template used to publish individual journal entries as HTML."
+  "Template used to publish individual journal entries as HTML.
+This may be text or a filename."
   :type 'string
   :group 'muse-journal)
 
@@ -158,13 +160,18 @@ and group 3 is the optional heading for the entry."
   :type 'string
   :group 'muse-journal)
 
-(defcustom muse-journal-latex-markup-tags
-  '(("qotd" t nil muse-journal-latex-qotd-tag))
-  "A list of tag specifications, for specially marking up LaTeX.
-See `muse-publish-markup-tags' for more info."
+(defcustom muse-journal-markup-tags
+  '(("qotd" t nil nil muse-journal-qotd-tag))
+  "A list of tag specifications, for specially marking up Journal entries.
+See `muse-publish-markup-tags' for more info.
+
+This is used by journal-latex and its related styles, as well as
+the journal-rss-entry style, which both journal-rdf and
+journal-rss use."
   :type '(repeat (list (string :tag "Markup tag")
                        (boolean :tag "Expect closing tag" :value t)
                        (boolean :tag "Parse attributes" :value nil)
+                       (boolean :tag "Nestable" :value nil)
                        function))
   :group 'muse-journal)
 
@@ -228,7 +235,7 @@ This may be text or a filename."
   :group 'muse-journal)
 
 (defcustom muse-journal-rdf-entry-template
-  "  <item rdf:about=\"%link%#%anchor%\">
+  "\n  <item rdf:about=\"%link%#%anchor%\">
     <title>%title%</title>
     <description>
       %desc%
@@ -237,12 +244,15 @@ This may be text or a filename."
     <dc:date>%date%</dc:date>
     <dc:creator>%maintainer%</dc:creator>
   </item>\n"
-  "Template used to publish individual journal entries as RDF."
+  "Template used to publish individual journal entries as RDF.
+This may be text or a filename."
   :type 'string
   :group 'muse-journal)
 
-(defcustom muse-journal-rdf-summarize-entries t
-  "If non-nil, include only summaries in the RDF file, not the full data."
+(defcustom muse-journal-rdf-summarize-entries nil
+  "If non-nil, include only summaries in the RDF file, not the full data.
+
+The default is nil, because this annoys some subscribers."
   :type 'boolean
   :group 'muse-journal)
 
@@ -267,13 +277,13 @@ This may be text or a filename."
                                 muse-html-extension))</lisp></link>
     <description><lisp>(muse-publishing-directive \"desc\")</lisp></description>
     <language>en-us</language>
-    <generator>Emacs Muse</generator>"
+    <generator>Emacs Muse</generator>\n\n"
   "Header used for publishing RSS 2.0 files.  This may be text or a filename."
   :type 'string
   :group 'muse-journal)
 
 (defcustom muse-journal-rss-footer
-  "  </channel>
+  "\n\n  </channel>
 </rss>\n"
   "Footer used for publishing RSS 2.0 files.  This may be text or a filename."
   :type 'string
@@ -286,7 +296,7 @@ This may be text or a filename."
   :group 'muse-journal)
 
 (defcustom muse-journal-rss-entry-template
-  "    <item>
+  "\n    <item>
       <title>%title%</title>
       <link>%link%#%anchor%</link>
       <description>%desc%</description>
@@ -295,7 +305,8 @@ This may be text or a filename."
       <guid>%link%#%anchor%</guid>
       %enclosure%
     </item>\n"
-  "Template used to publish individual journal entries as RSS 2.0."
+  "Template used to publish individual journal entries as RSS 2.0.
+This may be text or a filename."
   :type 'string
   :group 'muse-journal)
 
@@ -309,7 +320,8 @@ Useful for podcasting."
 
 (defcustom muse-journal-rss-summarize-entries nil
   "If non-nil, include only summaries in the RSS file, not the full data.
-Many RSS subscribers find this annoying."
+
+The default is nil, because this annoys some subscribers."
   :type 'boolean
   :group 'muse-journal)
 
@@ -338,12 +350,29 @@ For more on the structure of this list, see
   :group 'muse-journal)
 
 (defun muse-journal-anchorize-title (title)
+  "This strips tags from TITLE, truncates TITLE at begin parenthesis,
+and escapes any remaining non-alphanumeric characters."
   (save-match-data
     (if (string-match "(" title)
         (setq title (substring title 0 (match-beginning 0))))
     (if (string-match "<[^>]+>" title)
         (setq title (replace-match "" nil nil title)))
-    (downcase (muse-replace-regexp-in-string "[^a-zA-Z0-9_]" "" title))))
+    (let (pos code len ch)
+      (while (setq pos (string-match (concat "[^" muse-regexp-alnum "_]")
+                                     title pos))
+          (setq ch (aref title pos)
+                code (format "%%%02X" (cond ((fboundp 'char-to-ucs)
+                                             (char-to-ucs ch))
+                                            ((fboundp 'char-to-int)
+                                             (char-to-int ch))
+                                            (t ch)))
+                len (length code)
+                title (concat (substring title 0 pos)
+                              code
+                              (when (< pos (length title))
+                                (substring title (1+ pos) nil)))
+                pos (+ len pos)))
+        title)))
 
 (defun muse-journal-sort-entries (&optional direction)
   (interactive "P")
@@ -365,6 +394,14 @@ For more on the structure of this list, see
    (function
     (lambda ()
       (end-of-line)))))
+
+(defun muse-journal-qotd-tag (beg end)
+  (muse-publish-ensure-block beg end)
+  (muse-insert-markup (muse-markup-text 'begin-quote))
+  (muse-insert-markup (muse-markup-text 'begin-quote-item))
+  (goto-char end)
+  (muse-insert-markup (muse-markup-text 'end-quote-item))
+  (muse-insert-markup (muse-markup-text 'end-quote)))
 
 (defun muse-journal-html-munge-buffer ()
   (goto-char (point-min))
@@ -392,7 +429,7 @@ For more on the structure of this list, see
                    (string-to-number (match-string 3 date))
                    (string-to-number (match-string 2 date))
                    (string-to-number (match-string 1 date))
-                   (current-time-zone))
+                   nil)
                   date (concat (format-time-string
                                 muse-journal-date-format datestamp)
                                (substring date (match-end 0))))))
@@ -414,20 +451,32 @@ For more on the structure of this list, see
           (save-excursion
             (when (search-forward "<qotd>" nil t)
               (let ((tag-beg (match-beginning 0))
-                    (beg (match-end 0)))
+                    (beg (match-end 0))
+                    end)
                 (re-search-forward "</qotd>\n*")
-                (setq qotd (buffer-substring-no-properties
-                            beg (match-beginning 0)))
-                (delete-region tag-beg (match-end 0)))))
+                (setq end (point-marker))
+                (save-restriction
+                  (narrow-to-region beg (match-beginning 0))
+                  (muse-publish-escape-specials (point-min) (point-max)
+                                                nil 'document)
+                  (setq qotd (buffer-substring-no-properties
+                              (point-min) (point-max))))
+                (delete-region tag-beg end)
+                (set-marker end nil))))
           (setq text (buffer-string))
           (delete-region (point-min) (point-max))
           (let ((entry muse-journal-html-entry-template))
-            (muse-insert-markup entry)
+            (muse-insert-file-or-string entry)
+            (muse-publish-mark-read-only (point-min) (point-max))
             (goto-char (point-min))
             (while (search-forward "%date%" nil t)
+              (remove-text-properties (match-beginning 0) (match-end 0)
+                                      '(read-only nil rear-nonsticky nil))
               (replace-match (or date "") nil t))
             (goto-char (point-min))
             (while (search-forward "%title%" nil t)
+              (remove-text-properties (match-beginning 0) (match-end 0)
+                                      '(read-only nil rear-nonsticky nil))
               (replace-match (or title "&nbsp;") nil t))
             (goto-char (point-min))
             (while (search-forward "%anchor%" nil t)
@@ -436,16 +485,23 @@ For more on the structure of this list, see
                              nil t))
             (goto-char (point-min))
             (while (search-forward "%qotd%" nil t)
-              (replace-match (or qotd "") nil t))
+              (save-restriction
+                (narrow-to-region (match-beginning 0) (match-end 0))
+                (delete-region (point-min) (point-max))
+                (when qotd (muse-insert-markup qotd))))
             (goto-char (point-min))
             (while (search-forward "%text%" nil t)
+              (remove-text-properties (match-beginning 0) (match-end 0)
+                                      '(read-only nil rear-nonsticky nil))
               (replace-match text nil t))
             (when (null qotd)
               (goto-char (point-min))
               (when (search-forward "<div class=\"entry-qotd\">" nil t)
                 (let ((beg (match-beginning 0)))
                   (re-search-forward "</div>\n*" nil t)
-                  (delete-region beg (point)))))))))))
+                  (delete-region beg (point))))))))))
+  ;; indicate that we are to continue the :before-end processing
+  nil)
 
 (defun muse-journal-latex-munge-buffer ()
   (goto-char (point-min))
@@ -488,7 +544,7 @@ For more on the structure of this list, see
                         (string-to-number (match-string 3 date))
                         (string-to-number (match-string 2 date))
                         (string-to-number (match-string 1 date))
-                        (current-time-zone))
+                        nil)
                   date (format-time-string
                         muse-journal-date-format date))))
         (save-restriction
@@ -515,13 +571,9 @@ For more on the structure of this list, see
           (muse-insert-markup muse-journal-latex-subsection)
           (goto-char (point-min))
           (while (search-forward "%title%" nil t)
-            (replace-match title nil t)))))))
-
-(defun muse-journal-latex-qotd-tag (beg end)
-  (goto-char beg)
-  (muse-insert-markup (muse-markup-text 'begin-quote))
-  (goto-char end)
-  (muse-insert-markup (muse-markup-text 'end-quote)))
+            (replace-match title nil t))))))
+  ;; indicate that we are to continue the :before-end processing
+  nil)
 
 (defun muse-journal-rss-munge-buffer ()
   (goto-char (point-min))
@@ -547,7 +599,7 @@ For more on the structure of this list, see
                                     (string-to-number (match-string 3 date))
                                     (string-to-number (match-string 2 date))
                                     (string-to-number (match-string 1 date))
-                                    (current-time-zone))
+                                    nil)
                   ;; make sure that date is in a format that RSS
                   ;; readers can handle
                   date (let ((system-time-locale "C"))
@@ -573,7 +625,7 @@ For more on the structure of this list, see
                   (forward-sentence 2)
                   (setq desc (concat (buffer-substring beg (point)) "...")))
               (save-restriction
-                (muse-publish-markup-buffer "rss-entry" "html")
+                (muse-publish-markup-buffer "rss-entry" "journal-rss-entry")
                 (goto-char (point-min))
                 (if (re-search-forward "Page published by Emacs Muse" nil t)
                     (goto-char (muse-line-end-position))
@@ -590,17 +642,26 @@ For more on the structure of this list, see
                     "Cannot find 'Page published by Emacs Muse ends here'.\n"
                     "You will probably need this text in your footer."))
                   (goto-char (point-max)))
-                (setq desc (concat "<![CDATA[" (buffer-substring beg (point))
-                                   "]]>")))))
+                (setq desc (buffer-substring beg (point))))))
+          (unless (string= desc "")
+            (setq desc (concat "<![CDATA[" desc "]]>")))
           (delete-region (point-min) (point-max))
           (let ((entry (muse-style-element :entry-template)))
-            (muse-insert-markup entry)
+            (muse-insert-file-or-string entry)
             (goto-char (point-min))
             (while (search-forward "%date%" nil t)
               (replace-match (or date "") nil t))
             (goto-char (point-min))
             (while (search-forward "%title%" nil t)
-              (replace-match (or title "Untitled") nil t))
+              (replace-match "")
+              (save-restriction
+                (narrow-to-region (point) (point))
+                (insert (or title "Untitled"))
+                (remove-text-properties (match-beginning 0) (match-end 0)
+                                        '(read-only nil rear-nonsticky nil))
+                (let ((muse-publishing-current-style (muse-style "html")))
+                  (muse-publish-escape-specials (point-min) (point-max)
+                                                nil 'document))))
             (goto-char (point-min))
             (while (search-forward "%desc%" nil t)
               (replace-match desc nil t))
@@ -649,58 +710,64 @@ For more on the structure of this list, see
               (replace-match
                (or (muse-style-element :maintainer)
                    (concat "webmaster@" (system-name)))
-               nil t))))))
-    (unless (eobp)
-      (delete-region (point) (point-max)))))
+               nil t)))))))
+  ;; indicate that we are to continue the :before-end processing
+  nil)
 
-(unless (assoc "journal-html" muse-publishing-styles)
-  (muse-derive-style "journal-html" "html"
-                     :before-end 'muse-journal-html-munge-buffer)
 
-  (muse-derive-style "journal-xhtml" "xhtml"
-                     :before-end 'muse-journal-html-munge-buffer)
+;;; Register the Muse Journal Publishers
 
-  (muse-derive-style "journal-latex" "latex"
-                     :tags 'muse-journal-latex-markup-tags
-                     :before-end 'muse-journal-latex-munge-buffer)
+(muse-derive-style "journal-html" "html"
+                   :before-end 'muse-journal-html-munge-buffer)
 
-  (muse-derive-style "journal-pdf" "pdf"
-                     :tags 'muse-journal-latex-markup-tags
-                     :before-end 'muse-journal-latex-munge-buffer)
+(muse-derive-style "journal-xhtml" "xhtml"
+                   :before-end 'muse-journal-html-munge-buffer)
 
-  (muse-derive-style "journal-book-latex" "book-latex"
-                     ;;:nochapters
-                     :tags 'muse-journal-latex-markup-tags
-                     :before-end 'muse-journal-latex-munge-buffer)
+(muse-derive-style "journal-latex" "latex"
+                   :tags 'muse-journal-markup-tags
+                   :before-end 'muse-journal-latex-munge-buffer)
 
-  (muse-derive-style "journal-book-pdf" "book-pdf"
-                     ;;:nochapters
-                     :tags 'muse-journal-latex-markup-tags
-                     :before-end 'muse-journal-latex-munge-buffer)
+(muse-derive-style "journal-pdf" "pdf"
+                   :tags 'muse-journal-markup-tags
+                   :before-end 'muse-journal-latex-munge-buffer)
 
-  (muse-define-style "journal-rdf"
-                     :suffix         'muse-journal-rdf-extension
-                     :regexps        'muse-journal-rss-markup-regexps
-                     :functions      'muse-journal-rss-markup-functions
-                     :before         'muse-journal-rss-munge-buffer
-                     :header         'muse-journal-rdf-header
-                     :footer         'muse-journal-rdf-footer
-                     :date-format    'muse-journal-rdf-date-format
-                     :entry-template 'muse-journal-rdf-entry-template
-                     :base-url       'muse-journal-rdf-base-url
-                     :summarize      'muse-journal-rdf-summarize-entries)
+(muse-derive-style "journal-book-latex" "book-latex"
+                   ;;:nochapters
+                   :tags 'muse-journal-markup-tags
+                   :before-end 'muse-journal-latex-munge-buffer)
 
-  (muse-define-style "journal-rss"
-                     :suffix         'muse-journal-rss-extension
-                     :regexps        'muse-journal-rss-markup-regexps
-                     :functions      'muse-journal-rss-markup-functions
-                     :before         'muse-journal-rss-munge-buffer
-                     :header         'muse-journal-rss-header
-                     :footer         'muse-journal-rss-footer
-                     :date-format    'muse-journal-rss-date-format
-                     :entry-template 'muse-journal-rss-entry-template
-                     :base-url       'muse-journal-rss-base-url
-                     :summarize      'muse-journal-rss-summarize-entries))
+(muse-derive-style "journal-book-pdf" "book-pdf"
+                   ;;:nochapters
+                   :tags 'muse-journal-markup-tags
+                   :before-end 'muse-journal-latex-munge-buffer)
+
+(muse-define-style "journal-rdf"
+                   :suffix         'muse-journal-rdf-extension
+                   :regexps        'muse-journal-rss-markup-regexps
+                   :functions      'muse-journal-rss-markup-functions
+                   :before         'muse-journal-rss-munge-buffer
+                   :header         'muse-journal-rdf-header
+                   :footer         'muse-journal-rdf-footer
+                   :date-format    'muse-journal-rdf-date-format
+                   :entry-template 'muse-journal-rdf-entry-template
+                   :base-url       'muse-journal-rdf-base-url
+                   :summarize      'muse-journal-rdf-summarize-entries)
+
+(muse-define-style "journal-rss"
+                   :suffix         'muse-journal-rss-extension
+                   :regexps        'muse-journal-rss-markup-regexps
+                   :functions      'muse-journal-rss-markup-functions
+                   :before         'muse-journal-rss-munge-buffer
+                   :header         'muse-journal-rss-header
+                   :footer         'muse-journal-rss-footer
+                   :date-format    'muse-journal-rss-date-format
+                   :entry-template 'muse-journal-rss-entry-template
+                   :base-url       'muse-journal-rss-base-url
+                   :summarize      'muse-journal-rss-summarize-entries)
+
+;; Used by `muse-journal-rss-munge-buffer' to mark up individual entries
+(muse-derive-style "journal-rss-entry" "html"
+                   :tags 'muse-journal-markup-tags)
 
 (provide 'muse-journal)
 

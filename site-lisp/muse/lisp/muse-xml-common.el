@@ -1,12 +1,12 @@
 ;;; muse-xml-common.el --- common routines for XML-like publishing styles
 
-;; Copyright (C) 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2005, 2006, 2007, 2008, 2009  Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -46,7 +46,7 @@
   "An alist mapping Emacs coding systems to appropriate XML charsets.
 Use the base name of the coding system (i.e. without the -unix)."
   :type '(alist :key-type coding-system :value-type string)
-  :group 'muse-publish)
+  :group 'muse-xml)
 
 (defun muse-xml-transform-content-type (content-type default)
   "Using `muse-xml-encoding-map', try and resolve an Emacs coding
@@ -98,7 +98,7 @@ if not escaped."
       (save-match-data
         (while (setq pos (string-match (concat "[^-"
                                                muse-regexp-alnum
-                                               "/:._=@\\?~#%\"\\+<>&;]")
+                                               "/:._=@\\?~#%\"\\+<>()&;]")
                                        str pos))
           (setq ch (aref str pos)
                 code (concat "&#" (int-to-string
@@ -132,41 +132,59 @@ if not escaped."
   ;; elements with the same type will be reversed with respect to each
   ;; other.
   (let ((decisions '((nil nil nil)      ; body < header, body < footer
-                     (t nil t)          ; header stays where it is
-                     (t nil nil))))     ; footer < header
+                     (t   nil t)        ; header stays where it is
+                     (t   nil nil))))   ; footer < header
     (sort table #'(lambda (l r)
-                    (nth (1- (car r))
-                         (nth (1- (car l)) decisions))))))
+                    (and (integerp (car l)) (integerp (car r))
+                         (nth (1- (car r))
+                              (nth (1- (car l)) decisions)))))))
 
 (defun muse-xml-markup-table (&optional attributes)
+  "Publish the matched region into a table.
+If a string ATTRIBUTES is given, pass it to the markup string begin-table."
   (let* ((table-info (muse-publish-table-fields (match-beginning 0)
                                                 (match-end 0)))
          (row-len (car table-info))
+         (supports-group (not (string= (muse-markup-text 'begin-table-group
+                                                         row-len)
+                                       "")))
          (field-list (muse-xml-sort-table (cdr table-info)))
          last-part)
     (when table-info
+      (let ((beg (point)))
+        (muse-publish-ensure-block beg))
       (muse-insert-markup (muse-markup-text 'begin-table (or attributes "")))
       (muse-insert-markup (muse-markup-text 'begin-table-group row-len))
       (dolist (fields field-list)
         (let* ((type (car fields))
-               (part (cond ((= type 1) "tbody")
+               (part (cond ((eq type 'hline) nil)
+                           ((= type 1) "tbody")
                            ((= type 2) "thead")
                            ((= type 3) "tfoot")))
-               (col (cond ((= type 1) "td")
+               (col (cond ((eq type 'hline) nil)
+                          ((= type 1) "td")
                           ((= type 2) "th")
                           ((= type 3) "td"))))
           (setq fields (cdr fields))
-          (unless (and last-part (string= part last-part))
+          (unless (and part last-part (string= part last-part))
             (when last-part
-              (muse-insert-markup "  </" last-part ">\n"))
-            (muse-insert-markup "  <" part ">\n")
+              (muse-insert-markup "  </" last-part ">\n")
+              (when (eq type 'hline)
+                ;; horizontal separators are represented by closing
+                ;; the current table group and opening a new one
+                (muse-insert-markup (muse-markup-text 'end-table-group))
+                (muse-insert-markup (muse-markup-text 'begin-table-group
+                                                      row-len))))
+            (when part
+              (muse-insert-markup "  <" part ">\n"))
             (setq last-part part))
-          (muse-insert-markup (muse-markup-text 'begin-table-row))
-          (dolist (field fields)
-            (muse-insert-markup (muse-markup-text 'begin-table-entry  col))
-            (insert field)
-            (muse-insert-markup (muse-markup-text 'end-table-entry  col)))
-          (muse-insert-markup (muse-markup-text 'end-table-row))))
+          (unless (eq type 'hline)
+            (muse-insert-markup (muse-markup-text 'begin-table-row))
+            (dolist (field fields)
+              (muse-insert-markup (muse-markup-text 'begin-table-entry  col))
+              (insert field)
+              (muse-insert-markup (muse-markup-text 'end-table-entry  col)))
+            (muse-insert-markup (muse-markup-text 'end-table-row)))))
       (when last-part
         (muse-insert-markup "  </" last-part ">\n"))
       (muse-insert-markup (muse-markup-text 'end-table-group))

@@ -6,7 +6,7 @@
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -233,19 +233,18 @@ function to `message-send-hook'."
          (buffer-substring-no-properties (point-min) (point-max)))
        "<#/multipart>\n"))))
 
-(unless (assoc "message" muse-publishing-styles)
-  (muse-define-style "message"
-                     :functions 'muse-message-markup-functions
-                     :strings   'muse-message-markup-strings
-                     :tags      'muse-message-markup-tags)
+(muse-define-style "message"
+                   :functions 'muse-message-markup-functions
+                   :strings   'muse-message-markup-strings
+                   :tags      'muse-message-markup-tags)
 
-  (muse-derive-style "message-html" "html"
-                     :header 'muse-message-html-header
-                     :footer 'muse-message-html-footer)
+(muse-derive-style "message-html" "html"
+                   :header 'muse-message-html-header
+                   :footer 'muse-message-html-footer)
 
-  (muse-derive-style "message-xhtml" "xhtml"
-                     :header 'muse-message-html-header
-                     :footer 'muse-message-html-footer))
+(muse-derive-style "message-xhtml" "xhtml"
+                   :header 'muse-message-html-header
+                   :footer 'muse-message-html-footer)
 
 (provide 'muse-message)
 

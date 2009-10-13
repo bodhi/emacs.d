@@ -1,12 +1,13 @@
 ;;; muse-http.el --- publish HTML files over HTTP
 
-;; Copyright (C) 2004, 2005 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -153,7 +154,7 @@ cached in memory to speed up serving time."
             (setq muse-buffer-mtime modified-time))
           (goto-char (point-max))
           (when (bobp)
-            (insert-file-contents file t)
+            (muse-insert-file-contents file t)
             (let ((styles (cddr (muse-project muse-http-serving-p)))
                   style)
               (while (and styles (null style))

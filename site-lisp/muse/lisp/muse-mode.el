@@ -1,12 +1,13 @@
 ;;; muse-mode.el --- mode for editing Muse files; has font-lock support
 
-;; Copyright (C) 2004, 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -34,6 +35,13 @@
 ;; insertion of relative links and list items, backlink searching, and
 ;; other things as well.
 
+;; Stefan Schlee (stefan_schlee AT yahoo DOT com) fixed a bug in
+;; muse-next-reference and muse-previous-reference involving links
+;; that begin at point 1.
+
+;; Gregory Collins (greg AT gregorycollins DOT net) fixed a bug with
+;; paragraph separation and headings when filling.
+
 ;;; Code:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -41,6 +49,8 @@
 ;; Emacs Muse Major Mode
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(provide 'muse-mode)
 
 (require 'muse)
 (require 'muse-regexps)
@@ -137,15 +147,17 @@ index at intervals."
 
     map))
 
+;;; Muse mode
+
 (defvar muse-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map [(control ?c) (control ?a)] 'muse-index)
-    (define-key map [(control ?c) (control ?c)] 'muse-follow-name-at-point)
     (define-key map [(control ?c) (control ?e)] 'muse-edit-link-at-point)
     (define-key map [(control ?c) (control ?l)] 'font-lock-mode)
     (define-key map [(control ?c) (control ?t)]
       'muse-project-publish-this-file)
     (define-key map [(control ?c) (control ?T)] 'muse-publish-this-file)
+    (define-key map [(control ?c) (meta control ?t)] 'muse-publish-this-file)
     (define-key map [(control ?c) (control ?v)] 'muse-browse-result)
 
     (define-key map [(control ?c) ?=]           'muse-what-changed)
@@ -172,6 +184,7 @@ index at intervals."
     (define-key map [(control ?c) (control ?f)] 'muse-project-find-file)
     (define-key map [(control ?c) (control ?p)] 'muse-project-publish)
 
+    (define-key map [(control ?c) (control ?i)] 'muse-insert-thing)
     (define-key map [(control ?c) tab] 'muse-insert-thing)
 
     ;; Searching functions
@@ -189,8 +202,6 @@ index at intervals."
 
     map)
   "Keymap used by Emacs Muse mode.")
-
-;; Code:
 
 ;;;###autoload
 (define-derived-mode muse-mode text-mode "Muse"
@@ -218,18 +229,26 @@ index at intervals."
       (add-to-list 'fill-nobreak-predicate
                    'muse-mode-fill-nobreak-p)))
   ;; Make fill work nicely with item lists
-  (set (make-local-variable 'adaptive-fill-regexp)
-       (concat "\\s-+\\(-\\|[0-9]+\\.\\)\\s-+\\|\\[[0-9]+\\]\\s-*"
-               "\\|.*\\s-*::\\s-+\\|\\s-*"))
-  (set (make-local-variable 'paragraph-start)
-       (concat paragraph-start
-               "\\|\\s-+\\(-\\|[0-9]+\\.\\)\\s-+\\|\\[[0-9]+\\]\\s-*"
-               "\\|.*\\s-*::\\s-+"))
+  (let ((regexp (concat "\\s-+\\(-\\|[0-9]+\\.\\)\\s-+"
+                        "\\|\\[[0-9]+\\]\\s-*"
+                        "\\|.*\\s-*::\\s-+"
+                        "\\|\\*+\\s-+")))
+    (set (make-local-variable 'adaptive-fill-regexp)
+         (concat regexp "\\|\\s-*"))
+    (set (make-local-variable 'paragraph-start)
+         (concat paragraph-start "\\|" regexp))
+    (set (make-local-variable 'paragraph-separate)
+         (concat paragraph-separate "\\|\\*+\\s-+")))
+  (set (make-local-variable 'fill-paragraph-function)
+       'muse-mode-fill-paragraph)
+
   ;; Comment syntax is `; comment'
   (set (make-local-variable 'comment-start)
        "; ")
   (set (make-local-variable 'comment-start-skip)
        "^;\\s-+")
+  (set (make-local-variable 'indent-line-function)
+       #'ignore)
   ;; If we're using Emacs21, this makes flyspell work like it should
   (when (boundp 'flyspell-generic-check-word-p)
     (set (make-local-variable 'flyspell-generic-check-word-p)
@@ -264,16 +283,38 @@ fill mode."
            (string= (or (match-string 0) "")
                     "[[")))))
 
+(defun muse-mode-fill-paragraph (arg)
+  "If a definition list is at point, use special filling rules for it.
+Otherwise return nil to let the normal filling function take care
+of things.
+
+ARG is passed to `fill-paragraph'."
+  (let ((count 2))
+    (and (not (muse-mode-fill-nobreak-p))
+         (save-excursion
+           (beginning-of-line)
+           (and (looking-at muse-dl-term-regexp)
+                (prog1 t
+                  ;; Take initial whitespace into account
+                  (when (looking-at (concat "[" muse-regexp-blank "]+"))
+                    (setq count (+ count (length (match-string 0))))))))
+         (let ((fill-prefix (make-string count ?\ ))
+               (fill-paragraph-function nil))
+           (prog1 t
+             (fill-paragraph arg))))))
+
 (defun muse-mode-flyspell-p ()
   "Return non-nil if we should allow spell-checking to occur at point.
 Otherwise return nil.
 
 This is used to keep links from being improperly colorized by flyspell."
-  (and (not (get-text-property (if (bobp) (point) (1- (point)))
-                               'muse-link))
-       (save-match-data
-         (null (muse-link-at-point)))))
+  (let ((pos (if (bobp) (point) (1- (point)))))
+    (and (not (get-text-property pos 'muse-no-flyspell))
+         (not (get-text-property pos 'muse-link))
+         (save-match-data
+           (null (muse-link-at-point))))))
 
+;;;###autoload
 (defun muse-mode-choose-mode ()
   "Turn the proper Emacs Muse related mode on for this file."
   (let ((project (muse-project-of-file)))
@@ -293,13 +334,13 @@ This is used to keep links from being improperly colorized by flyspell."
   "See if point is on a blank line"
   (save-excursion
     (beginning-of-line)
-    (looking-at (concat "[" muse-regexp-blank "]?[\n]+"))))
+    (looking-at (concat "[" muse-regexp-blank "]*$"))))
 
 (defun muse-get-paragraph-start ()
   "Return the start of the current paragraph. This function will
 return nil if there are no prior paragraphs and the beginning of
 the line if point is on a blank line."
-  (let ((para-start (concat "[\n]+[" muse-regexp-blank "]?[\n]+")))
+  (let ((para-start (concat "^[" muse-regexp-blank "]*$")))
     ;; search back to start of paragraph
     (save-excursion
       (save-match-data
@@ -489,11 +530,17 @@ Valid values of OPERATION are 'increase and 'decrease."
    (muse-make-link (file-relative-name (read-file-name "Link: "))
                    (read-string "Text: "))))
 
+(defcustom muse-insert-url-initial-input "http://"
+  "The string to insert before reading a URL interactively.
+This is used by the `muse-insert-url' command."
+  :type 'string
+  :group 'muse-mode)
+
 (defun muse-insert-url ()
   "Insert a URL, with optional description, at point."
   (interactive)
   (insert
-   (muse-make-link (read-string "URL: ")
+   (muse-make-link (read-string "URL: " muse-insert-url-initial-input)
                    (read-string "Text: "))))
 
 ;;;###autoload
@@ -547,12 +594,15 @@ in `muse-project-alist'."
                   (find-file-other-window link)
                 (find-file link))))))
       (when anchor
-        (let ((pos (point)))
+        (let ((pos (point))
+              (regexp (concat "^\\W*" (regexp-quote anchor) "\\b"))
+              last)
           (goto-char (point-min))
-          (unless (re-search-forward (concat "^\\W*" (regexp-quote anchor)
-                                             "\\b")
-                                     nil t)
-            (goto-char pos)))))))
+          (while (and (setq last (re-search-forward regexp nil t))
+                      (muse-link-at-point)))
+          (unless last
+            (goto-char pos)
+            (message "Could not find anchor `%s'" anchor)))))))
 
 (defun muse-visit-link (link &optional other-window)
   "Visit the URL or link named by LINK."
@@ -570,16 +620,24 @@ in `muse-project-alist'."
                                             (cddr muse-current-project))
          current-prefix-arg))
   (setq style (muse-style style))
-  (let ((result-path
-         (muse-publish-output-file buffer-file-name
-                                   (muse-style-element :path style) style)))
-    (if (not (file-readable-p result-path))
-        (error "Cannot open output file '%s'" result-path)
+  (muse-project-publish-this-file nil style)
+  (let* ((output-dir (muse-style-element :path style))
+         (output-suffix (muse-style-element :osuffix style))
+         (output-path (muse-publish-output-file buffer-file-name output-dir
+                                                style))
+         (target (if output-suffix
+                     (concat (muse-path-sans-extension output-path)
+                             output-suffix)
+                   output-path))
+         (muse-current-output-style (list :base (car style)
+                                          :path output-dir)))
+    (if (not (file-readable-p target))
+        (error "Cannot open output file '%s'" target)
       (if other-window
-          (find-file-other-window result-path)
+          (find-file-other-window target)
         (let ((func (muse-style-element :browser style t)))
           (if func
-              (funcall func result-path)
+              (funcall func target)
             (message "The %s publishing style does not support browsing."
                      style)))))))
 
@@ -631,44 +689,62 @@ in `muse-project-alist'."
 (defun muse-next-reference ()
   "Move forward to next Muse link or URL, cycling if necessary."
   (interactive)
-  (let ((cycled 0) pos)
+  (let ((pos))
     (save-excursion
       (when (get-text-property (point) 'muse-link)
         (goto-char (or (next-single-property-change (point) 'muse-link)
                        (point-max))))
-      (while (< cycled 2)
-        (let ((next (point)))
-          (if (while (and (null pos)
-                          (setq next
-                                (next-single-property-change next 'muse-link)))
-                (when (get-text-property next 'muse-link)
-                  (setq pos next)))
-              (setq cycled 2)
-            (goto-char (point-min))
-            (setq cycled (1+ cycled))))))
-    (if pos
-        (goto-char pos))))
+
+      (setq pos (next-single-property-change (point) 'muse-link))
+
+      (when (not pos)
+        (if (get-text-property (point-min) 'muse-link)
+            (setq pos (point-min))
+          (setq pos (next-single-property-change (point-min) 'muse-link)))))
+
+    (when pos
+      (goto-char pos))))
 
 ;;;###autoload
 (defun muse-previous-reference ()
   "Move backward to the next Muse link or URL, cycling if necessary.
+In case of Emacs x <= 21 and ignoring of intangible properties (see
+`muse-mode-intangible-links').
+
 This function is not entirely accurate, but it's close enough."
   (interactive)
-  (let ((cycled 0) pos)
+  (let ((pos))
     (save-excursion
-      (while (< cycled 2)
-        (let ((prev (point)))
-          (if (while (and (null pos)
-                          (setq prev
-                                (previous-single-property-change
-                                 prev 'muse-link)))
-              (when (get-text-property prev 'muse-link)
-                (setq pos prev)))
-              (setq cycled 2)
-            (goto-char (point-max))
-            (setq cycled (1+ cycled))))))
-    (if pos
-        (goto-char pos))))
+
+      ;; Hack: The user perceives the two cases of point ("|")
+      ;; position (1) "|[[" and (2) "[[|" or "][|" as "point is at
+      ;; start of link".  But in the sense of the function
+      ;; "previous-single-property-change" these two cases are
+      ;; different.  The following code aligns these two cases.  Emacs
+      ;; 21: If the intangible property is ignored case (2) is more
+      ;; complicate and this hack only solves the problem partially.
+      ;;
+      (when (and (get-text-property (point) 'muse-link)
+                 (muse-looking-back "\\[\\|\\]"))
+        (goto-char (or (previous-single-property-change (point) 'muse-link)
+                       (point-min))))
+
+      (when (eq (point) (point-min))
+        (goto-char (point-max)))
+
+      (setq pos (previous-single-property-change (point) 'muse-link))
+
+      (when (not pos)
+        (if (get-text-property (point-min) 'muse-link)
+            (setq pos (point-min))
+          (setq pos (previous-single-property-change (point-max)
+                                                     'muse-link)))))
+
+    (when pos
+      (if (get-text-property pos 'muse-link)
+          (goto-char pos)
+        (goto-char (or (previous-single-property-change pos 'muse-link)
+                       (point-min)))))))
 
 ;;;###autoload
 (defun muse-what-changed ()
@@ -696,16 +772,19 @@ GREP-COMMAND if passed will supplant `muse-grep-command'."
                             (shell-quote-argument
                              (expand-file-name dir)))
                           muse-directories " ")))
-    (while (string-match "%W" str)
-      (setq str (replace-match string t t str)))
-    (while (string-match "%D" str)
-      (setq str (replace-match dirs t t str)))
-    (if (fboundp 'compilation-start)
-        (compilation-start str nil (lambda (&rest args) "*search*")
-                           grep-regexp-alist)
-      (and (fboundp 'compile-internal)
-           (compile-internal str "No more search hits" "search"
-                             nil grep-regexp-alist)))))
+    (if (string= dirs "")
+        (muse-display-warning
+         "No directories were found in the current project; aborting search")
+      (while (string-match "%W" str)
+        (setq str (replace-match string t t str)))
+      (while (string-match "%D" str)
+        (setq str (replace-match dirs t t str)))
+      (if (fboundp 'compilation-start)
+          (compilation-start str nil (lambda (&rest args) "*search*")
+                             grep-regexp-alist)
+        (and (fboundp 'compile-internal)
+             (compile-internal str "No more search hits" "search"
+                               nil grep-regexp-alist))))))
 
 ;;;###autoload
 (defun muse-search-with-command (text)
@@ -795,7 +874,8 @@ function, you might want to set this manually.")
   "Insert a tag interactively with a blank line after it."
   (interactive
    (list
-    (completing-read
+    (funcall
+     muse-completing-read-function
      (concat "Tag: "
              (when muse-tag-history
                (concat "(default: " (car muse-tag-history) ") ")))
@@ -825,6 +905,109 @@ function, you might want to set this manually.")
       (insert (concat "\n\n</" tag ">\n"))
       (forward-line -2))))
 
-(provide 'muse-mode)
+;;; Muse list edit minor mode
+
+(defvar muse-list-edit-minor-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [(meta return)] 'muse-l-e-m-m-insert-list-item)
+    (define-key map [(control ?>)] 'muse-l-e-m-m-increase-list-item-indent)
+    (define-key map [(control ?<)] 'muse-l-e-m-m-decrease-list-item-indent)
+
+    map)
+  "Keymap used by Muse list edit minor mode.")
+
+(defvar muse-l-e-m-m-list-item-regexp
+  (concat "^%s\\(\\([^\n" muse-regexp-blank "].*?\\)?::"
+          "\\(?:[" muse-regexp-blank "]+\\|$\\)"
+          "\\|[" muse-regexp-blank "]?[-*+][" muse-regexp-blank "]*"
+          "\\|[" muse-regexp-blank "][0-9]+\\.[" muse-regexp-blank "]*\\)")
+  "Regexp used to match the beginning of a list item.
+This is used by `muse-list-edit-minor-mode'.
+The '%s' will be replaced with a whitespace regexp when publishing.")
+
+(defun muse-l-e-m-m-insert-list-item ()
+  "Insert a list item at the current point, taking into account
+your current list type and indentation level."
+  (interactive)
+  (let ((muse-list-item-regexp muse-l-e-m-m-list-item-regexp))
+    (call-interactively 'muse-insert-list-item)))
+
+(defun muse-l-e-m-m-increase-list-item-indent ()
+  "Increase the indentation of the current list item."
+  (interactive)
+  (let ((muse-list-item-regexp muse-l-e-m-m-list-item-regexp))
+    (call-interactively 'muse-increase-list-item-indentation)))
+
+(defun muse-l-e-m-m-decrease-list-item-indent ()
+  "Decrease the indentation of the current list item."
+  (interactive)
+  (let ((muse-list-item-regexp muse-l-e-m-m-list-item-regexp))
+    (call-interactively 'muse-decrease-list-item-indentation)))
+
+(defvar muse-l-e-m-m-data nil
+  "A list of data that was changed by Muse list edit minor mode.")
+(make-variable-buffer-local 'muse-l-e-m-m-data)
+
+;;;###autoload
+(define-minor-mode muse-list-edit-minor-mode
+  "This is a global minor mode for editing files with lists.
+It is meant to be used with other major modes, and not with Muse mode.
+
+Interactively, with no prefix argument, toggle the mode.
+With universal prefix ARG turn mode on.
+With zero or negative ARG turn mode off.
+
+This minor mode provides the Muse keybindings for editing lists,
+and support for filling lists properly.
+
+It recognizes not only Muse-style lists, which use the \"-\"
+character or numbers, but also lists that use asterisks or plus
+signs.  This should make the minor mode generally useful.
+
+Definition lists and footnotes are also recognized.
+
+Note that list items may omit leading spaces, for compatibility
+with modes that set `left-margin', such as
+`debian-changelog-mode'.
+
+\\{muse-list-edit-minor-mode-map}"
+  :init-value nil
+  :lighter ""
+  :keymap muse-list-edit-minor-mode-map
+  :global nil
+  :group 'muse-mode
+  (if (not muse-list-edit-minor-mode)
+      ;; deactivate
+      (when muse-l-e-m-m-data
+        (setq adaptive-fill-regexp (cdr (assoc "a-f-r" muse-l-e-m-m-data))
+              paragraph-start (cdr (assoc "p-s" muse-l-e-m-m-data))
+              fill-prefix (cdr (assoc "f-p" muse-l-e-m-m-data)))
+        (setq muse-l-e-m-m-data nil))
+    ;; activate
+    (unless muse-l-e-m-m-data
+      ;; save previous fill-related data so we can restore it later
+      (setq muse-l-e-m-m-data
+            (list (cons "a-f-r" adaptive-fill-regexp)
+                  (cons "p-s" paragraph-start)
+                  (cons "f-p" fill-prefix))))
+    ;; make fill work nicely with item lists
+    (let ((regexp (concat "\\s-*\\([-*+]\\|[0-9]+\\.\\)\\s-+"
+                          "\\|\\[[0-9]+\\]\\s-*"
+                          "\\|.*\\s-*::\\s-+")))
+      (set (make-local-variable 'adaptive-fill-regexp)
+           (concat regexp "\\|\\s-*"))
+      (set (make-local-variable 'paragraph-start)
+           (concat paragraph-start "\\|" regexp)))
+    ;; force fill-prefix to be nil, because if it is a string that has
+    ;; initial spaces, it messes up fill-paragraph's algorithm
+    (set (make-local-variable 'fill-prefix) nil)))
+
+(defun turn-on-muse-list-edit-minor-mode ()
+  "Unconditionally turn on Muse list edit minor mode."
+  (muse-list-edit-minor-mode 1))
+
+(defun turn-off-muse-list-edit-minor-mode ()
+  "Unconditionally turn off Muse list edit minor mode."
+  (muse-list-edit-minor-mode -1))
 
 ;;; muse-mode.el ends here

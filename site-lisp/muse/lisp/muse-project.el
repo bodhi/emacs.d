@@ -1,12 +1,13 @@
 ;;; muse-project.el --- handle Muse projects
 
-;; Copyright (C) 2004, 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -30,6 +31,8 @@
 ;; Muse Project Maintainance
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(provide 'muse-project)
 
 (require 'muse)
 (require 'muse-publish)
@@ -179,6 +182,11 @@ Muse can make use of."
                         (list :tag "No chapters"
                               (const :tag ":nochapters" ":nochapters")
                               (const t))
+                        (list :tag "Project-level publishing function"
+                              (const :tag ":publish-project"
+                                     ":publish-project")
+                              (choice (function :tag "Function")
+                                      (sexp :tag "Unknown")))
                         (list :tag "Set variables"
                               (const :tag ":set" ":set")
                               (repeat (list :inline t
@@ -188,7 +196,7 @@ Muse can make use of."
                               (const :tag ":visit-link" ":visit-link")
                               (choice (function)
                                       (sexp :tag "Unknown")))))
-               (repeat :tag "Styles" :format "%{%t%}:\n%v%i\n\n"
+               (repeat :tag "Output styles" :format "%{%t%}:\n%v%i\n\n"
                        (set :tag "Style"
                             (list :inline t
                                   :tag "Publishing style"
@@ -234,13 +242,27 @@ when publishing files in that project."
 (defcustom muse-project-ignore-regexp
   (concat "\\`\\(#.*#\\|.*,v\\|.*~\\|\\.\\.?\\|\\.#.*\\|,.*\\)\\'\\|"
           "/\\(CVS\\|RCS\\|\\.arch-ids\\|{arch}\\|,.*\\|\\.svn\\|"
-          "_darcs\\)\\(/\\|\\'\\)")
+          "\\.hg\\|\\.git\\|\\.bzr\\|_darcs\\)\\(/\\|\\'\\)")
   "A regexp matching files to be ignored in Muse directories.
 
-You should set case-fold-search to nil before using this regexp
+You should set `case-fold-search' to nil before using this regexp
 in code."
   :type 'regexp
   :group 'muse-regexp)
+
+(defcustom muse-project-publish-private-files t
+  "If this is non-nil, files will be published even if their permissions
+are set so that no one else on the filesystem can read them.
+
+Set this to nil if you would like to indicate that some files
+should not be published by manually doing \"chmod o-rwx\" on
+them.
+
+This setting has no effect under Windows (that is, all files are
+published regardless of permissions) because Windows lacks the
+needed filesystem attributes."
+  :type 'boolean
+  :group 'muse-project)
 
 (defun muse-project-recurse-directory (base)
   "Recusively retrieve all of the directories underneath BASE.
@@ -262,22 +284,31 @@ which match `muse-project-ignore-regexp'."
                               (muse-project-recurse-directory file)))))
       list)))
 
-(defun muse-project-alist-styles (entry-dir output-dir style)
+(defun muse-project-alist-styles (entry-dir output-dir style &rest other)
   "Return a list of styles to use in a `muse-project-alist' entry.
 ENTRY-DIR is the top-level directory of the project.
 OUTPUT-DIR is where Muse files are published, keeping directory structure.
 STYLE is the publishing style to use.
 
+OTHER contains other definitions to add to each style.  It is optional.
+
 For an example of the use of this function, see
 `examples/mwolson/muse-init.el' from the Muse distribution."
-  (cons `(:base ,style :path ,(expand-file-name output-dir)
-                :include ,(concat "/" (file-name-nondirectory entry-dir)
-                                  "/[^/]+$"))
-        (mapcar (lambda (dir)
-                  `(:base ,style
-                          :path ,(expand-file-name dir output-dir)
-                          :include ,(concat "/" dir "/[^/]+$")))
-                (muse-project-recurse-directory entry-dir))))
+  (let ((fnd (file-name-nondirectory entry-dir)))
+    (when (string= fnd "")
+      ;; deal with cases like "foo/" that have a trailing slash
+      (setq fnd (file-name-nondirectory (substring entry-dir 0 -1))))
+    (cons `(:base ,style :path ,(if (muse-file-remote-p output-dir)
+                                    output-dir
+                                  (expand-file-name output-dir))
+                  :include ,(concat "/" fnd "/[^/]+$")
+                  ,@other)
+          (mapcar (lambda (dir)
+                    `(:base ,style
+                            :path ,(expand-file-name dir output-dir)
+                            :include ,(concat "/" dir "/[^/]+$")
+                            ,@other))
+                  (muse-project-recurse-directory entry-dir)))))
 
 (defun muse-project-alist-dirs (entry-dir)
   "Return a list of directories to use in a `muse-project-alist' entry.
@@ -301,6 +332,9 @@ For an example of the use of this function, see
 (defvar muse-current-project nil
   "Project we are currently visiting.")
 (make-variable-buffer-local 'muse-current-project)
+(defvar muse-current-project-global nil
+  "Project we are currently visiting.  This is used to propagate the value
+of `muse-current-project' into a new buffer during publishing.")
 
 (defvar muse-current-output-style nil
   "The output style that we are currently using for publishing files.")
@@ -318,29 +352,51 @@ For an example of the use of this function, see
 (defun muse-project-page-file (page project &optional no-check-p)
   "Return a filename if PAGE exists within the given Muse PROJECT."
   (setq project (muse-project project))
-  (let ((dir (file-name-directory page)))
-    (when dir (setq page (file-name-nondirectory page)))
-    (let ((files (muse-collect-alist
-                  (muse-project-file-alist project no-check-p)
-                  page))
-          (matches nil))
-      (if dir
-          (save-match-data
-            (dolist (file files)
-              (let ((pos (string-match (concat (regexp-quote dir) "\\'")
-                                       (file-name-directory (cdr file)))))
-                (when pos
-                  (setq matches (cons (cons pos (cdr file))
-                                      matches)))))
-            (car (muse-sort-by-rating matches)))
-        (dolist (file files)
-          (setq matches (cons (cons (length (cdr file)) (cdr file))
-                              matches)))
-        (car (muse-sort-by-rating matches '<))))))
+  (if (null page)
+      ;; if not given a page, return the first directory instead
+      (let ((pats (cadr project)))
+        (catch 'done
+          (while pats
+            (if (symbolp (car pats))
+                (setq pats (cddr pats))
+              (throw 'done (file-name-as-directory (car pats)))))))
+    (let ((dir (file-name-directory page))
+          (expanded-path nil))
+      (when dir
+        (setq expanded-path (concat (expand-file-name
+                                     page
+                                     (file-name-directory (muse-current-file)))
+                                    (when muse-file-extension
+                                      (concat "." muse-file-extension))))
+        (setq page (file-name-nondirectory page)))
+      (let ((files (muse-collect-alist
+                    (muse-project-file-alist project no-check-p)
+                    page))
+            (matches nil))
+        (if dir
+            (catch 'done
+              (save-match-data
+                (dolist (file files)
+                  (if (and expanded-path
+                           (string= expanded-path (cdr file)))
+                      (throw 'done (cdr file))
+                    (let ((pos (string-match (concat (regexp-quote dir) "\\'")
+                                             (file-name-directory
+                                              (cdr file)))))
+                      (when pos
+                        (setq matches (cons (cons pos (cdr file))
+                                            matches)))))))
+              ;; if we haven't found an exact match, pick a candidate
+              (car (muse-sort-by-rating matches)))
+          (dolist (file files)
+            (setq matches (cons (cons (length (cdr file)) (cdr file))
+                                matches)))
+          (car (muse-sort-by-rating matches '<)))))))
 
 (defun muse-project-private-p (file)
   "Return non-nil if NAME is a private page with PROJECT."
-  (unless muse-under-windows-p
+  (unless (or muse-under-windows-p
+              muse-project-publish-private-files)
     (setq file (file-truename file))
     (if (file-attributes file)  ; don't publish if no attributes exist
         (or (when (eq ?- (aref (nth 8 (file-attributes
@@ -389,16 +445,9 @@ For an example of the use of this function, see
 (defvar muse-updating-file-alist-p nil
   "Make sure that recursive calls to `muse-project-file-alist' are bounded.")
 
-(defun muse-project-file-alist (&optional project no-check-p)
-  "Return member filenames for the given Muse PROJECT.
-On UNIX, this list is only updated if one of the directories'
-contents have changed.  On Windows, it is always reread from
-disk."
-  (setq project (muse-project project))
-  (let* ((file-alist (assoc (car project) muse-project-file-alist))
-         (last-mod (cdr (cdr file-alist))))
-    ;; Determine the last modified of any directory mentioned in the
-    ;; project's pattern list
+(defun muse-project-determine-last-mod (project &optional no-check-p)
+  "Return the most recent last-modified timestamp of dirs in PROJECT."
+  (let ((last-mod nil))
     (unless (or muse-under-windows-p no-check-p)
       (let ((pats (cadr project)))
         (while pats
@@ -418,35 +467,84 @@ disk."
                                  (muse-time-less-p last-mod mod-time)))
                     (setq last-mod mod-time)))))
             (setq pats (cdr pats))))))
-    ;; Either return the currently known list, or read it again from
-    ;; disk
-    (if (or (and no-check-p (cadr file-alist))
-            muse-updating-file-alist-p
-            (not (or muse-under-windows-p
-                     (null (cddr file-alist))
-                     (null last-mod)
-                     (muse-time-less-p (cddr file-alist) last-mod))))
-        (cadr file-alist)
-      (if file-alist
-          (setcdr (cdr file-alist) last-mod)
-        (setq file-alist (cons (car project) (cons nil last-mod))
-              muse-project-file-alist
-              (cons file-alist muse-project-file-alist)))
-      ;; Read in all of the file entries
-      (let ((muse-updating-file-alist-p t))
-        (prog1
-            (save-match-data
-              (setcar
-               (cdr file-alist)
-               (let* ((names (list t))
-                      (pats (cadr project)))
-                 (while pats
-                   (if (symbolp (car pats))
-                       (setq pats (cddr pats))
-                     (nconc names (muse-project-file-entries (car pats)))
-                     (setq pats (cdr pats))))
-                 (cdr names))))
-          (run-hooks 'muse-project-file-alist-hook))))))
+    last-mod))
+
+(defun muse-project-file-alist (&optional project no-check-p)
+  "Return member filenames for the given Muse PROJECT.
+Also, update the `muse-project-file-alist' variable.
+
+On UNIX, this alist is only updated if one of the directories'
+contents have changed.  On Windows, it is always reread from
+disk.
+
+If NO-CHECK-P is non-nil, do not update the alist, just return
+the current one."
+  (setq project (muse-project project))
+  (when (and project muse-project-alist)
+    (let* ((file-alist (assoc (car project) muse-project-file-alist))
+           (last-mod (muse-project-determine-last-mod project no-check-p)))
+      ;; Either return the currently known list, or read it again from
+      ;; disk
+      (if (or (and no-check-p (cadr file-alist))
+              muse-updating-file-alist-p
+              (not (or muse-under-windows-p
+                       (null (cddr file-alist))
+                       (null last-mod)
+                       (muse-time-less-p (cddr file-alist) last-mod))))
+          (cadr file-alist)
+        (if file-alist
+            (setcdr (cdr file-alist) last-mod)
+          (setq file-alist (cons (car project) (cons nil last-mod))
+                muse-project-file-alist
+                (cons file-alist muse-project-file-alist)))
+        ;; Read in all of the file entries
+        (let ((muse-updating-file-alist-p t))
+          (prog1
+              (save-match-data
+                (setcar
+                 (cdr file-alist)
+                 (let* ((names (list t))
+                        (pats (cadr project)))
+                   (while pats
+                     (if (symbolp (car pats))
+                         (setq pats (cddr pats))
+                       (nconc names (muse-project-file-entries (car pats)))
+                       (setq pats (cdr pats))))
+                   (cdr names))))
+            (run-hooks 'muse-project-file-alist-hook)))))))
+
+(defun muse-project-add-to-alist (file &optional project)
+  "Make sure FILE is added to `muse-project-file-alist'.
+
+It works by either calling the `muse-project-file-alist' function
+if a directory has been modified since we last checked, or
+manually forcing the file entry to exist in the alist.  This
+works around an issue where if several files being saved at the
+same time, only the first one will make it into the alist.  It is
+meant to be called by `muse-project-after-save-hook'.
+
+The project of the file is determined by either the PROJECT
+argument, or `muse-project-of-file' if PROJECT is not specified."
+  (setq project (or (muse-project project) (muse-project-of-file file)))
+  (when (and project muse-project-alist)
+    (let* ((file-alist (assoc (car project) muse-project-file-alist))
+           (last-mod (muse-project-determine-last-mod project)))
+      ;; Determine whether we need to call this
+      (if (or (null (cddr file-alist))
+              (null last-mod)
+              (muse-time-less-p (cddr file-alist) last-mod))
+          ;; The directory will show up as modified, so go ahead and
+          ;; call `muse-project-file-alist'
+          (muse-project-file-alist project)
+        ;; It is not showing as modified, so forcefully add the
+        ;; current file to the project file-alist
+        (let ((muse-updating-file-alist-p t))
+          (prog1
+              (save-match-data
+                (setcar (cdr file-alist)
+                        (nconc (muse-project-file-entries file)
+                               (cadr file-alist))))
+            (run-hooks 'muse-project-file-alist-hook)))))))
 
 (defun muse-project-of-file (&optional pathname)
   "Determine which project the given PATHNAME relates to.
@@ -456,6 +554,7 @@ If PATHNAME is nil, the current buffer's filename is used."
     (unless pathname (setq pathname (muse-current-file)))
     (save-match-data
       (when (and (stringp pathname)
+                 muse-project-alist
                  (not (string= pathname ""))
                  (not (let ((case-fold-search nil))
                         (or (string-match muse-project-ignore-regexp
@@ -465,27 +564,31 @@ If PATHNAME is nil, the current buffer's filename is used."
                                            pathname))))))
         (let* ((file (file-truename pathname))
                (dir  (file-name-directory file))
-               (project-entry muse-project-alist)
-               found)
-          (while (and project-entry (not found))
-            (let ((pats (car (cdar project-entry))))
-              (while (and pats (not found))
-                (if (symbolp (car pats))
-                    (setq pats (cddr pats))
-                  (let ((truename (file-truename (car pats))))
-                    (if (or (string= truename file)
-                            (string= truename dir)
-                            (string-match (regexp-quote truename) file))
-                        (setq found (car project-entry))))
-                  (setq pats (cdr pats))))
-              (setq project-entry (cdr project-entry))))
-          found)))))
+               found rating matches)
+          (catch 'found
+            (dolist (project-entry muse-project-alist)
+              (let ((pats (cadr project-entry)))
+                (while pats
+                  (if (symbolp (car pats))
+                      (setq pats (cddr pats))
+                    (let ((tname (file-truename (car pats))))
+                      (cond ((or (string= tname file)
+                                 (string= (file-name-as-directory tname) dir))
+                             (throw 'found project-entry))
+                            ((string-match (concat "\\`" (regexp-quote tname))
+                                           file)
+                             (setq matches (cons (cons (match-end 0)
+                                                       project-entry)
+                                                 matches)))))
+                    (setq pats (cdr pats))))))
+            ;; if we haven't found an exact match, pick a candidate
+            (car (muse-sort-by-rating matches))))))))
 
 (defun muse-project-after-save-hook ()
   "Update Muse's file-alist if we are saving a Muse file."
   (let ((project (muse-project-of-file)))
     (when project
-      (muse-project-file-alist project))))
+      (muse-project-add-to-alist (buffer-file-name) project))))
 
 (add-hook 'after-save-hook 'muse-project-after-save-hook)
 
@@ -493,21 +596,25 @@ If PATHNAME is nil, the current buffer's filename is used."
   "Read a project name from the minibuffer, if it can't be figured
   out."
   (if (null muse-project-alist)
-      (error "There are no Muse projects defined; see `muse-project-alist'.")
+      (error "There are no Muse projects defined; see `muse-project-alist'")
     (or (unless no-check-p
           (muse-project-of-file))
         (if (and (not no-assume)
                  (= 1 (length muse-project-alist)))
             (car muse-project-alist)
-          (assoc (completing-read prompt muse-project-alist)
+          (assoc (funcall muse-completing-read-function
+                          prompt muse-project-alist)
                  muse-project-alist)))))
 
 (defvar muse-project-page-history nil)
 
 (defun muse-read-project-file (project prompt &optional default)
-  (let ((name (completing-read prompt (muse-project-file-alist project)
-                               nil nil nil 'muse-project-page-history
-                               default)))
+  (let* ((file-list (muse-delete-dups
+                     (mapcar #'(lambda (a) (list (car a)))
+                             (muse-project-file-alist project))))
+         (name (funcall muse-completing-read-function
+                       prompt file-list nil nil nil
+                       'muse-project-page-history default)))
     (cons name (muse-project-page-file name project))))
 
 ;;;###autoload
@@ -536,7 +643,8 @@ first directory within the project's fileset is used."
     ;; If we're given a relative or absolute filename, open it as-is
     (if (and (car name)
              (save-match-data
-               (or (string-match muse-file-regexp (car name))
+               (or (string-match "\\`\\.+/" (car name))
+                   (string-match muse-file-regexp (car name))
                    (string-match muse-image-regexp (car name)))))
         (setcdr name (car name))
       ;; At this point, name is (PAGE . FILE).
@@ -549,19 +657,18 @@ first directory within the project's fileset is used."
                   (setq directory (car pats) pats nil)
                 (setq pats (cdr pats))))))
         (when directory
-          (let ((filename (expand-file-name
-                           (if (and muse-file-extension
-                                    (not (string= muse-file-extension "")))
-                               (concat (car name) "." muse-file-extension)
-                             (car name))
-                           directory)))
+          (let ((filename (expand-file-name (car name) directory)))
+            (when (and muse-file-extension
+                       (not (string= muse-file-extension ""))
+                       (not (file-exists-p (car name))))
+              (setq filename (concat filename "." muse-file-extension)))
             (unless (file-exists-p directory)
               (make-directory directory t))
             (setcdr name filename)))))
     ;; Open the file
     (if (cdr name)
         (funcall (or command 'find-file) (cdr name))
-      (error "There is no page %s in project %s."
+      (error "There is no page %s in project %s"
              (car name) project-name))))
 
 (defun muse-project-choose-style (closure test styles)
@@ -579,11 +686,12 @@ If no style passes TEST, return the first style."
 (defun muse-project-choose-style-by-link-suffix (given-suffix style)
   "If the given STYLE has a link-suffix that equals GIVEN-SUFFIX,
 return non-nil."
-  (let ((link-suffix (muse-style-element :link-suffix style)))
+  (let ((link-suffix (or (muse-style-element :link-suffix style)
+                         (muse-style-element :suffix style))))
     (and (stringp link-suffix)
          (string= given-suffix link-suffix))))
 
-(defun muse-project-applicable-styles (file styles &optional ignore-regexp)
+(defun muse-project-applicable-styles (file styles)
   "Given STYLES, return a list of the ones that are considered for FILE.
 The name of a project may be used for STYLES."
   (when (stringp styles)
@@ -594,14 +702,13 @@ The name of a project may be used for STYLES."
         (let ((include-regexp (muse-style-element :include style))
               (exclude-regexp (muse-style-element :exclude style))
               (rating nil))
-          (when (and (or ignore-regexp
-                         (and (null include-regexp)
+          (when (and (or (and (null include-regexp)
                               (null exclude-regexp))
                          (if include-regexp
                              (setq rating (string-match include-regexp file))
                            (not (string-match exclude-regexp file))))
-                     (or (not (file-exists-p file))
-                         (not (muse-project-private-p file))))
+                     (file-exists-p file)
+                     (not (muse-project-private-p file)))
             (setq used-styles (cons (cons rating style) used-styles)))))
       (muse-sort-by-rating (nreverse used-styles)))))
 
@@ -613,16 +720,40 @@ The user is prompted if several styles are found."
              (cons (muse-get-keyword :base style) style))
            (muse-project-applicable-styles file styles))))
 
+(defun muse-project-resolve-directory (page local-style remote-style)
+  "Figure out the directory part of the path that provides a link to PAGE.
+LOCAL-STYLE is the style of the current Muse file, and
+REMOTE-STYLE is the style associated with PAGE.
+
+If REMOTE-STYLE has a :base-url element, concatenate it and PAGE.
+Otherwise, return a relative link."
+  (let ((prefix (muse-style-element :base-url remote-style)))
+    (if prefix
+        (concat prefix page)
+      (file-relative-name (expand-file-name
+                           (file-name-nondirectory page)
+                           (muse-style-element :path remote-style))
+                          (expand-file-name
+                           (muse-style-element :path local-style))))))
+
 (defun muse-project-resolve-link (page local-style remote-styles)
-  "Return a published relative link from the output path of one file
-to another file.
+  "Return a published link from the output path of one file to another file.
 
 The best match for PAGE is determined by comparing the link
 suffix of the given local style and that of the remote styles.
 
 The remote styles are usually populated by
-`muse-project-applicable-styles'."
-  (let ((link-suffix (muse-style-element :link-suffix local-style))
+`muse-project-applicable-styles'.
+
+If no remote style is found, return PAGE verbatim
+
+If PAGE has a :base-url associated with it, return the
+concatenation of the :base-url value and PAGE.
+
+Otherwise, return a relative path from the directory of
+LOCAL-STYLE to the best directory among REMOTE-STYLES."
+  (let ((link-suffix (or (muse-style-element :link-suffix local-style)
+                         (muse-style-element :suffix local-style)))
         remote-style)
     (if (not (stringp link-suffix))
         (setq remote-style (car remote-styles))
@@ -630,18 +761,12 @@ The remote styles are usually populated by
                           link-suffix
                           #'muse-project-choose-style-by-link-suffix
                           remote-styles)))
-    (muse-publish-link-file
-     (if (null remote-style)
-         page
-       (let ((prefix (muse-style-element :base-url remote-style)))
-         (if prefix
-             (concat prefix page)
-           (file-relative-name (expand-file-name
-                                (file-name-nondirectory page)
-                                (muse-style-element :path remote-style))
-                               (expand-file-name
-                                (muse-style-element :path local-style))))))
-     nil remote-style)))
+    (if (null remote-style)
+        page
+      (setq page (muse-project-resolve-directory
+                  page local-style remote-style))
+      (concat (file-name-directory page)
+              (muse-publish-link-name page remote-style)))))
 
 (defun muse-project-current-output-style (&optional file project)
   (or muse-current-output-style
@@ -658,83 +783,95 @@ The remote styles are usually populated by
                                 (muse-project-page-file page project)
                                 (cddr project)))))
 
-(defun muse-project-publish-file (file styles &optional force ignore-regexp)
-  (setq styles (muse-project-applicable-styles file styles ignore-regexp))
+(defun muse-project-publish-file-default (file style output-dir force)
+  ;; ensure the publishing location is available
+  (unless (file-exists-p output-dir)
+    (message "Creating publishing directory %s" output-dir)
+    (make-directory output-dir t))
+  ;; publish the member file!
+  (muse-publish-file file style output-dir force))
+
+(defun muse-project-publish-file (file styles &optional force)
+  (setq styles (muse-project-applicable-styles file styles))
   (let (published)
     (dolist (style styles)
-      (let ((output-dir (muse-style-element :path style))
-            (muse-current-output-style style))
-        ;; ensure the publishing location is available
-        (unless (file-exists-p output-dir)
-          (message "Creating publishing directory %s" output-dir)
-          (make-directory output-dir t))
-        ;; publish the member file!
-        (if (muse-publish-file file style output-dir force)
-            (setq published t))))
+      (if (or (not (listp style))
+              (not (cdr style)))
+          (muse-display-warning
+           (concat "Skipping malformed muse-project-alist style."
+                   "\nPlease double-check your configuration,"))
+        (let ((output-dir (muse-style-element :path style))
+              (muse-current-output-style style)
+              (fun (or (muse-style-element :publish style t)
+                       'muse-project-publish-file-default)))
+          (when (funcall fun file style output-dir force)
+            (setq published t)))))
     published))
 
 ;;;###autoload
-(defun muse-project-publish-this-file (&optional force)
+(defun muse-project-publish-this-file (&optional force style)
   "Publish the currently-visited file according to `muse-project-alist',
 prompting if more than one style applies.
 
-If FORCE is given, publish the file even if it is up-to-date."
+If FORCE is given, publish the file even if it is up-to-date.
+
+If STYLE is given, use that publishing style rather than
+prompting for one."
   (interactive (list current-prefix-arg))
-  (let* ((style (muse-project-get-applicable-style
-                buffer-file-name (cddr muse-current-project)))
-         (output-dir (muse-style-element :path style)))
-    (unless (muse-publish-file buffer-file-name style output-dir force)
-      (message (concat "The published version is up-to-date; use"
-                       " C-u C-c C-t to force an update.")))))
+  (let ((muse-current-project (muse-project-of-file)))
+    (if (not muse-current-project)
+        ;; file is not part of a project, so fall back to muse-publish
+        (if (interactive-p) (call-interactively 'muse-publish-this-file)
+          (muse-publish-this-file style nil force))
+      (unless style
+        (setq style (muse-project-get-applicable-style
+                     buffer-file-name (cddr muse-current-project))))
+      (let* ((output-dir (muse-style-element :path style))
+             (muse-current-project-global muse-current-project)
+             (muse-current-output-style (list :base (car style)
+                                              :path output-dir))
+             (fun (or (muse-style-element :publish style t)
+                      'muse-project-publish-file-default)))
+        (unless (funcall fun buffer-file-name style output-dir force)
+          (message (concat "The published version is up-to-date; use"
+                           " C-u C-c C-t to force an update.")))))))
 
 (defun muse-project-save-buffers (&optional project)
   (setq project (muse-project project))
-  (map-y-or-n-p
-   (function
-    (lambda (buffer)
-      (and (buffer-modified-p buffer)
-           (not (buffer-base-buffer buffer))
-           (or (buffer-file-name buffer)
-               (progn
-                 (set-buffer buffer)
-                 (and buffer-offer-save
-                      (> (buffer-size) 0))))
-           (with-current-buffer buffer
-             (let ((proj (muse-project-of-file)))
-               (and proj (string= (car proj)
-                                  (car project)))))
-           (if (buffer-file-name buffer)
-               (format "Save file %s? "
-                       (buffer-file-name buffer))
-             (format "Save buffer %s? "
-                     (buffer-name buffer))))))
-   (function
-    (lambda (buffer)
-      (set-buffer buffer)
-      (save-buffer)))
-   (buffer-list)
-   '("buffer" "buffers" "save")
-   (if (boundp 'save-some-buffers-action-alist)
-       save-some-buffers-action-alist)))
+  (when project
+    (save-excursion
+      (map-y-or-n-p
+       (function
+        (lambda (buffer)
+          (and (buffer-modified-p buffer)
+               (not (buffer-base-buffer buffer))
+               (or (buffer-file-name buffer)
+                   (progn
+                     (set-buffer buffer)
+                     (and buffer-offer-save
+                          (> (buffer-size) 0))))
+               (with-current-buffer buffer
+                 (let ((proj (muse-project-of-file)))
+                   (and proj (string= (car proj)
+                                      (car project)))))
+               (if (buffer-file-name buffer)
+                   (format "Save file %s? "
+                           (buffer-file-name buffer))
+                 (format "Save buffer %s? "
+                         (buffer-name buffer))))))
+       (function
+        (lambda (buffer)
+          (set-buffer buffer)
+          (save-buffer)))
+       (buffer-list)
+       '("buffer" "buffers" "save")
+       (if (boundp 'save-some-buffers-action-alist)
+           save-some-buffers-action-alist)))))
 
-;;;###autoload
-(defun muse-project-publish (project &optional force)
+(defun muse-project-publish-default (project styles &optional force)
   "Publish the pages of PROJECT that need publishing."
-  (interactive (list (muse-read-project "Publish project: " nil t)
-                     current-prefix-arg))
   (setq project (muse-project project))
-  (let ((styles (cddr project))
-        (muse-current-project project)
-        published)
-    ;; determine the style from the project, or else ask
-    (unless styles
-      (setq styles (list (muse-publish-get-style))))
-    (unless project
-      (error "Cannot find a project to publish"))
-    ;; prompt to save any buffers related to this project
-    (muse-project-save-buffers project)
-    ;; run hook before publishing begins
-    (run-hook-with-args 'muse-before-project-publish-hook project)
+  (let ((published nil))
     ;; publish all files in the project, for each style; the actual
     ;; publishing will only happen if the files are newer than the
     ;; last published output, or if the file is listed in
@@ -756,6 +893,29 @@ If FORCE is given, publish the file even if it is up-to-date."
       (message "No pages in %s need publishing at this time."
                (car project)))))
 
+;;;###autoload
+(defun muse-project-publish (project &optional force)
+  "Publish the pages of PROJECT that need publishing."
+  (interactive (list (muse-read-project "Publish project: " nil t)
+                     current-prefix-arg))
+  (setq project (muse-project project))
+  (let ((styles (cddr project))
+        (muse-current-project project)
+        (muse-current-project-global project))
+    ;; determine the style from the project, or else ask
+    (unless styles
+      (setq styles (list (muse-publish-get-style))))
+    (unless project
+      (error "Cannot find a project to publish"))
+    ;; prompt to save any buffers related to this project
+    (muse-project-save-buffers project)
+    ;; run hook before publishing begins
+    (run-hook-with-args 'muse-before-project-publish-hook project)
+    ;; run the project-level publisher
+    (let ((fun (or (muse-get-keyword :publish-project (cadr project) t)
+                   'muse-project-publish-default)))
+      (funcall fun project styles force))))
+
 (defun muse-project-batch-publish ()
   "Publish Muse files in batch mode."
   (let ((muse-batch-publishing-p t)
@@ -774,6 +934,8 @@ If FORCE is given, publish the file even if it is up-to-date."
 
 (defun muse-project-set-variables ()
   "Load project-specific variables."
+  (when (and muse-current-project-global (null muse-current-project))
+    (setq muse-current-project muse-current-project-global))
   (let ((vars (muse-get-keyword :set (cadr muse-current-project)))
         sym custom-set var)
     (while vars
@@ -784,6 +946,9 @@ If FORCE is given, publish the file even if it is up-to-date."
                   (make-local-variable sym)))
       (funcall custom-set var (car (cdr vars)))
       (setq vars (cdr (cdr vars))))))
+
+(custom-add-option 'muse-before-publish-hook 'muse-project-set-variables)
+(add-to-list 'muse-before-publish-hook 'muse-project-set-variables)
 
 (defun muse-project-delete-output-files (project)
   (interactive
@@ -804,7 +969,5 @@ If FORCE is given, publish the file even if it is up-to-date."
                     path)))
         (if output-file
             (muse-delete-file-if-exists output-file))))))
-
-(provide 'muse-project)
 
 ;;; muse-project.el ends here

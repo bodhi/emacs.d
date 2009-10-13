@@ -10,7 +10,7 @@
 ;;
 ;;     This program is free software; you can redistribute it and/or
 ;;     modify it under the terms of the GNU General Public License as
-;;     published by the Free Software Foundation; either version 2 of
+;;     published by the Free Software Foundation; either version 3 of
 ;;     the License, or (at your option) any later version.
 ;;
 ;;     This program is distributed in the hope that it will be useful,
@@ -177,18 +177,32 @@
 ;; Text output using `message' goes to stderr, and thus normally to
 ;; your web server's error_log.
 ;; ====================================================================
+
+(eval-and-compile
+  (if (fboundp 'calendar-extract-month)
+      (defalias 'cgi-calendar-extract-month 'calendar-extract-month)
+    (defalias 'cgi-calendar-extract-month 'extract-calendar-month))
+
+  (if (fboundp 'calendar-extract-year)
+      (defalias 'cgi-calendar-extract-year 'calendar-extract-year)
+    (defalias 'cgi-calendar-extract-year 'extract-calendar-year))
+
+  (if (fboundp 'calendar-generate)
+      (defalias 'cgi-calendar-generate 'calendar-generate)
+    (defalias 'cgi-calendar-generate 'generate-calendar)))
+
 (defun cgi-calendar-string ()
   (require 'calendar)
   (let* ((args (cgi-arguments))
 	 (now (calendar-current-date))
 	 (mnth (cdr (assoc "month" args)))
 	 (month (if mnth (string-to-number mnth)
-		  (extract-calendar-month now)))
+		  (cgi-calendar-extract-month now)))
 	 (yr (cdr (assoc "year" args)))
 	 (year (if yr (string-to-number yr)
-		 (extract-calendar-year now))))
+		 (cgi-calendar-extract-year now))))
     (with-temp-buffer
-      (generate-calendar month year)
+      (cgi-calendar-generate month year)
       (buffer-string))))
 
 (defun cgi-calendar ()

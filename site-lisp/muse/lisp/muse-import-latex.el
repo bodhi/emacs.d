@@ -1,12 +1,13 @@
 ;;; muse-import-latex.el --- convert a LaTex file into a Muse file
 
-;; Copyright (C) 2004, 2005 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -128,7 +129,8 @@
                     (if (looking-at "\\s-+")
                         (delete-region (match-beginning 0)
                                        (match-end 0)))
-                    (forward-line)))))))
+                    (forward-line))))
+              (set-marker e nil))))
         (insert "[" (number-to-string footnote-index) "]")
         (if (string= (match-string 2) "footnote")
             (muse-i-l-write-footnote footnote-index (match-string 9))

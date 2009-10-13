@@ -6,14 +6,16 @@
   <title><lisp>(concat (car (muse-project))
                        " - "
                        (muse-wiki-publish-pretty-title))</lisp></title>
-  <link rel="alternate" type="application/rss+xml" title="RSS" href="http://www.mwolson.org/blog/index.rss" />
-  <link rel="author" href="http://www.mwolson.org/web/AboutMe.html" />
-  <link rel="home" href="http://www.mwolson.org/web/WelcomePage.html" />
+  <link rel="alternate" type="application/rss+xml" title="RSS" href="http://blog.mwolson.org/index.rss" />
+  <link rel="author" href="http://mwolson.org/web/AboutMe.html" />
+  <link rel="home" href="http://mwolson.org/web/WelcomePage.html" />
+  <link rel="shortcut icon"
+        href="http://mwolson.org/static/logos/favicon.ico" />
   <lisp>
     (muse-style-element :style-sheet muse-publishing-current-style)
   </lisp>
-  <meta name="description" content="Michael Olson, maintainer of emacs-wiki and Muse" />
-  <meta name="keywords" content="emacs-wiki,muse" />
+  <meta name="description" content="Michael Olson, maintainer of Emacs Muse and ERC" />
+  <meta name="keywords" content="emacs,muse,erc,emms" />
   <meta name="generator" content="Muse" />
   <meta http-equiv="<lisp>muse-html-meta-http-equiv</lisp>" content="<lisp>muse-html-meta-content-type</lisp>" />
 </head>
@@ -30,7 +32,7 @@
   </div>
 
   <div class="menuitem">
-    <a title="My blog." href="/blog/">Blog</a>
+    <a title="My blog." href="http://blog.mwolson.org/">Blog</a>
   </div>
 
   <div class="menuitem">
@@ -38,11 +40,11 @@
   </div>
 
   <div class="menuitem">
-    <a title="Leave comments about me or my site here." href="/blog/guestbook.html">Guestbook</a>
+    <a title="Stuff from some of my classes." href="/notes/WikiIndex.html">Notes</a>
   </div>
 
   <div class="menuitem">
-    <a title="Stuff from some of my classes." href="/notes/WikiIndex.html">Notes</a>
+  <a title="Philisophical writings and ideas." href="/web/PhilosophyPage.html">Philosophy</a>
   </div>
 
   <div class="menuitem">
@@ -56,17 +58,15 @@
 </div><!-- menu ends here -->
 
 <h1 id="top">
-<a href="<lisp>(muse-wiki-resolve-project-page)</lisp>"
+<a href="<lisp>(muse-wiki-resolve-project-page "Website")</lisp>"
 style="text-decoration: none;">
 <img src="/static/logos/site-logo.png"
 alt="mwolson.org logo" />
 </a>
 <a class="top" href="<lisp>(muse-wiki-resolve-project-page
                              (muse-project))</lisp>">
-<lisp>(concat
-        (car (muse-project))
-        " - "
-        (muse-wiki-publish-pretty-title))</lisp>
+<lisp>(concat (car (muse-project)) " - "
+              (muse-wiki-publish-pretty-title))</lisp>
 </a>
 </h1>
 

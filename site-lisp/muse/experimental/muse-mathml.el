@@ -1,6 +1,6 @@
 ;;; muse-mathml.el --- provide MathML support for Muse
 
-;; Copyright (C) 2004, 2005 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006 Free Software Foundation, Inc.
 
 ;; Author: Li Daobing (lidaobing AT gmail DOT com)
 ;; Keywords: Muse mathml hypermedia
@@ -9,7 +9,7 @@
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -146,25 +146,24 @@ This may be text or a filename."
   :type 'string
   :group 'muse-mathml)
 
-(defun muse-publish-math-tag (beg end)
+(defun muse-publish-mathml-tag (beg end)
   (if muse-mathml-command
       (muse-publish-command-tag
        beg end (list (cons "interp" muse-mathml-command)))
     (muse-publish-example-tag beg end)))
 
-;; Add the <math> tag
+;; Add the <mathml> tag
 
 (add-to-list 'muse-publish-markup-tags
-             '("math" t nil muse-publish-math-tag)
+             '("mathml" t nil muse-publish-mathml-tag)
              t)
 
 ;; Register the Muse MathML Publisher
 
-(unless (assoc "mathml" muse-publishing-styles)
-  (muse-derive-style "mathml" "xhtml"
-                     :suffix    'muse-mathml-extension
-                     :header    'muse-mathml-header
-                     :footer    'muse-mathml-footer))
+(muse-derive-style "mathml" "xhtml"
+                   :suffix    'muse-mathml-extension
+                   :header    'muse-mathml-header
+                   :footer    'muse-mathml-footer)
 
 (provide 'muse-mathml)
 ;;; muse-mathml.el ends here

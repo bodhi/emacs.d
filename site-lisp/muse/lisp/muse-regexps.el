@@ -1,12 +1,13 @@
 ;;; muse-regexps.el --- define regexps used by Muse
 
-;; Copyright (C) 2004, 2005, 2006 Free Software Foundation, Inc.
+;; Copyright (C) 2004, 2005, 2006, 2007, 2008, 2009
+;;   Free Software Foundation, Inc.
 
 ;; This file is part of Emacs Muse.  It is not part of GNU Emacs.
 
 ;; Emacs Muse is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published
-;; by the Free Software Foundation; either version 2, or (at your
+;; by the Free Software Foundation; either version 3, or (at your
 ;; option) any later version.
 
 ;; Emacs Muse is distributed in the hope that it will be useful, but
@@ -143,12 +144,22 @@ the time."
 ;;; Regexps used to define Muse publishing syntax
 
 (defcustom muse-list-item-regexp
-  (concat "^%s\\([" muse-regexp-blank "]-[" muse-regexp-blank
-          "]*\\|[" muse-regexp-blank "][0-9]+\\.["
-          muse-regexp-blank "]*\\|\\([^\n" muse-regexp-blank "].*?\\)?"
-          "::\\(?:[" muse-regexp-blank "]+\\|$\\)\\)")
+  (concat "^%s\\(\\([^\n" muse-regexp-blank "].*?\\)?::"
+          "\\(?:[" muse-regexp-blank "]+\\|$\\)"
+          "\\|[" muse-regexp-blank "]-[" muse-regexp-blank "]*"
+          "\\|[" muse-regexp-blank "][0-9]+\\.[" muse-regexp-blank "]*\\)")
   "Regexp used to match the beginning of a list item.
 The '%s' will be replaced with a whitespace regexp when publishing."
+  :type 'regexp
+  :group 'muse-regexp)
+
+(defcustom muse-ol-item-regexp (concat "\\`[" muse-regexp-blank "]+[0-9]+\\.")
+  "Regexp used to match an ordered list item."
+  :type 'regexp
+  :group 'muse-regexp)
+
+(defcustom muse-ul-item-regexp (concat "\\`[" muse-regexp-blank "]+-")
+  "Regexp used to match an unordered list item."
   :type 'regexp
   :group 'muse-regexp)
 
@@ -160,6 +171,11 @@ The first match string must contain the term."
   :type 'regexp
   :group 'muse-regexp)
 
+(defcustom muse-dl-entry-regexp (concat "\\`[" muse-regexp-blank "]*::")
+  "Regexp used to match a definition list entry."
+  :type 'regexp
+  :group 'muse-regexp)
+
 (defcustom muse-table-field-regexp
   (concat "[" muse-regexp-blank "]+\\(|+\\)\\(?:["
           muse-regexp-blank "]\\|$\\)")
@@ -167,14 +183,35 @@ The first match string must contain the term."
   :type 'regexp
   :group 'muse-regexp)
 
-(defcustom muse-table-line-regexp (concat "^.*" muse-table-field-regexp ".*")
+(defcustom muse-table-line-regexp (concat ".*" muse-table-field-regexp ".*")
   "Regexp used to match a table line when publishing."
+  :type 'regexp
+  :group 'muse-regexp)
+
+(defcustom muse-table-hline-regexp (concat "[" muse-regexp-blank
+                                           "]*|[-+]+|[" muse-regexp-blank
+                                           "]*")
+  "Regexp used to match a horizontal separator line in a table."
+  :type 'regexp
+  :group 'muse-regexp)
+
+(defcustom muse-table-el-border-regexp (concat "[" muse-regexp-blank "]*"
+                                               "\\+\\(-*\\+\\)+"
+                                               "[" muse-regexp-blank "]*")
+  "Regexp used to match the beginning and end of a table.el-style table."
+  :type 'regexp
+  :group 'muse-regexp)
+
+(defcustom muse-table-el-line-regexp (concat "[" muse-regexp-blank "]*"
+                                             "|\\(.*|\\)*"
+                                           "[" muse-regexp-blank "]*")
+  "Regexp used to match a table line of a table.el-style table."
   :type 'regexp
   :group 'muse-regexp)
 
 (defcustom muse-tag-regexp
   (concat "<\\([^/" muse-regexp-blank "\n][^" muse-regexp-blank
-          "</>\n]*\\)\\(\\s-+[^<>\n]+[^</>\n]\\)?\\(/\\)?>")
+          "</>\n]*\\)\\(\\s-+[^<>]+[^</>\n]\\)?\\(/\\)?>")
   "A regexp used to find XML-style tags within a buffer when publishing.
 Group 1 should be the tag name, group 2 the properties, and group
 3 the optional immediate ending slash."
@@ -209,7 +246,7 @@ them, you will have to modify this."
 ;;; Regexps used to determine file types
 
 (defcustom muse-file-regexp
-  (concat "\\`[~/]\\|\\?\\|\\."
+  (concat "\\`[~/]\\|\\?\\|/\\'\\|\\."
           "\\(html?\\|pdf\\|mp3\\|el\\|zip\\|txt\\|tar\\)"
           "\\(\\.\\(gz\\|bz2\\)\\)?\\'")
   "A link matching this regexp will be regarded as a link to a file."
