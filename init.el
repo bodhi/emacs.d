@@ -21,7 +21,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 
 (setq imenu-auto-rescan t)       ; ensure function names auto-refresh
 
-(autoload 'js2-mode "js2-mode" nil t)
+(autoload 'js2-mode "js2" nil t)
 (add-to-list 'auto-mode-alist '("\\.js$" . js2-mode))
 
 ;; processing
@@ -208,6 +208,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
  '(global-font-lock-mode t nil (font-core))
  '(grep-find-ignored-directories (quote ("CVS" ".hg" "{arch}" ".svn")))
  '(indicate-empty-lines t)
+ '(js2-idle-timer-delay 1.0)
  '(make-backup-files nil)
  '(midnight-mode t nil (midnight))
  '(parens-require-spaces nil)
@@ -614,3 +615,8 @@ attributes are specified then they are only included in the opening tag."
 
 ;; Supercollider mode
 (add-to-list 'load-path (expand-file-name "~/.emacs.d/supercollider/"))
+
+;; RCIRC config
+;; Join these channels at startup.
+(setq rcirc-server-alist '(("irc.freenode.net")))
+(setq rcirc-default-nick "bodhi")

@@ -1,5 +1,4 @@
 ;; CYGWIN
-
 (let* ((cygwin-root "c:/cygwin")
        (cygwin-bin (concat cygwin-root "/bin")))
   (setenv "PATH" (concat cygwin-bin ";" (getenv "PATH")))
@@ -13,12 +12,10 @@
 
 (setenv "PATH" (concat "/cygdrive/c/Program Files/Git/bin" ";" (getenv "PATH")))
 
-
-
 ;; default face
-(set-face-font 'default "-outline-Envy Code R-normal-r-normal-normal-13-97-96-96-c-*-iso8859-1")
-
-(server-start)
+(set-face-attribute 'default nil :height 110 :foreground "grey95" :background "grey5")
+(set-face-attribute 'mode-line nil :background "grey75")
+(set-face-attribute 'font-lock-comment-face nil :foreground "chocolate3")
 
 ;; C# mode
 (autoload 'csharp-mode "csharp-mode.el" "Major mode for editing C# code." t)
@@ -34,4 +31,4 @@
 (global-set-key [C-pause] 'calc)
 
 (setq default-frame-alist
-      '((width . 130) (height . 45) (left . 30) (top . 30)))
+      '((width . 40) (height . 45) (left . 30) (top . 30)))
