@@ -13,5 +13,5 @@
 (setq ns-command-modifier 'meta)
 (setq ns-option-modifier nil)
 
-;;(setq ns-antialias-text nil)
+(setq ns-antialias-text t)
 ;;(setq ns-use-qd-smoothing nil)

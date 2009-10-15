@@ -221,13 +221,15 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
   ;; If you edit it by hand, you could mess it up, so be careful.
   ;; Your init file should contain only one such instance.
   ;; If there is more than one, they won't work right.
- '(default ((t (:stipple nil :background "grey5" :foreground "grey80" :inverse-video nil :box nil :strike-through nil :overline nil :underline nil :slant normal :weight normal :height 120 :width normal :foundry "apple" :family "Anonymous_Pro"))))
+ '(default ((t (:stipple nil :background "grey5" :foreground "grey80" :inverse-video nil :box nil :strike-through nil :overline nil :underline nil :slant normal :weight normal :height 150 :width normal :family "inconsolata"))))
  '(cursor ((t (:background "green"))))
  '(font-lock-comment-face ((((class color) (min-colors 88) (background dark)) (:foreground "chocolate4"))))
  '(fringe ((((class color) (background dark)) (:background "grey5"))))
  '(mmm-declaration-submode-face ((t (:background "dark slate gray"))))
  '(mmm-default-submode-face ((t (:background "Grey25"))))
- '(mode-line ((((class color) (min-colors 88)) (:background "grey50" :foreground "black" :box (:line-width -1 :style released-button))))))
+ '(mode-line ((((class color) (min-colors 88)) (:background "grey50" :foreground "black" :box (:line-width -1 :style released-button)))))
+ '(region ((t (:background "blue3"))))
+ '(variable-pitch ((t (:height 1.1 :family "baskerville")))))
 
 ;;(global-set-key (kbd "C-<tab>") 'next-window)
 
@@ -581,7 +583,6 @@ attributes are specified then they are only included in the opening tag."
 (autoload 'csv-mode "csv-mode"
   "Major mode for editing comma-separated value files." t)
 
-
 (setf comint-scroll-to-bottom-on-input t)  ; always insert at the bottom
 (setf comint-scroll-to-bottom-on-output nil) ; always add output at the bottom
 (setf comint-scroll-show-maximum-output t) ; scroll to show max possible output
@@ -614,7 +615,11 @@ attributes are specified then they are only included in the opening tag."
 (add-hook 'csharp-mode-hook 'c-subword-mode)
 
 ;; Supercollider mode
-(add-to-list 'load-path (expand-file-name "~/.emacs.d/supercollider/"))
+;;(add-to-list 'load-path (expand-file-name "~/.emacs.d/supercollider/"))
+
+(autoload 'longlines-mode "longlines.el" "Minor mode for editing long lines." t)
+(add-hook 'text-mode-hook 'longlines-mode)
+;;(setf longlines-wrap-follows-window-size t)
 
 ;; RCIRC config
 ;; Join these channels at startup.
