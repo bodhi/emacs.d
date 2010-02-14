@@ -9,3 +9,5 @@
 (global-set-key [C-f9] 'zoom-way-in)
 
 (global-set-key [C-pause] 'calc)
+
+(set-scroll-bar-mode 'right)

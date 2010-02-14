@@ -625,3 +625,5 @@ attributes are specified then they are only included in the opening tag."
 ;; Join these channels at startup.
 (setq rcirc-server-alist '(("irc.freenode.net")))
 (setq rcirc-default-nick "bodhi")
+
+(global-set-key "\M-["  'blink-matching-open)
