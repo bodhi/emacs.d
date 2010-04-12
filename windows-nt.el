@@ -32,3 +32,5 @@
 
 (setq default-frame-alist
       '((width . 40) (height . 45) (left . 30) (top . 30)))
+
+(server-start)
