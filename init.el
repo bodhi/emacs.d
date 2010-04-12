@@ -188,7 +188,7 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 (global-set-key (kbd "C-<return>") 'reindent-newline-and-indent)
 
 
-(setq indent-tabs-mode nil)
+(setq-default indent-tabs-mode nil)
 ;; Set the tab width
 (setq c-default-style "bsd")
 (setq c-basic-offset 2)
