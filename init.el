@@ -330,7 +330,9 @@ buffer read-only, so I suggest setting kill-read-only-ok to t."
 ;; (setq planner-use-day-pages nil)
 
 
-(setq user-mail-address "bodhi@5263.org")
+(let ((user "bodhi")
+      (domain "5263.org"))
+  (setq user-mail-address (concat user "@" domain)))
 
 ;;(add-to-list 'load-path "~/.emacs.d/site-lisp/emacs-w3m-1.4.4")
 ;;(require 'w3m-load)
