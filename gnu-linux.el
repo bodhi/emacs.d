@@ -1,4 +1,6 @@
-(set-face-font 'default "-schumacher-clean-medium-r-normal--12-120-75-75-c-60-iso8859-1")
+(set-face-font 'default "Inconsolata-dz")
+(set-face-attribute 'default nil :height 90)
+(set-face-attribute 'default nil :foreground "grey95")
 
 (server-start)
 
